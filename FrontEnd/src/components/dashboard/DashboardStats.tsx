@@ -1,427 +1,604 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUp, ArrowDown, Users, UserPlus, DollarSign, Ticket, Calendar as CalendarIcon, AlertTriangle } from 'lucide-react';
+import { motion, useInView, Variants } from 'framer-motion';
+import { ArrowUp, ArrowDown, Users, UserPlus, DollarSign, Ticket, Calendar as CalendarIcon, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
-import { differenceInDays, eachDayOfInterval, format } from 'date-fns';
+import { differenceInDays, format } from 'date-fns';
 import type { DateRange } from 'react-day-picker';
+import { useToast } from '@/hooks/use-toast';
 
 const NEW_LEADS_DAYS_WINDOW = 7;
 
-interface StatsCardProps {
+interface StatCardData {
   title: string;
-  value: number | string;
+  value: number;
   change: number;
   changeLabel: string;
   icon: React.ReactNode;
-  formatter?: (value: number | string) => string;
+  color: string;
+  bgColor: string;
+  trend: number[];
 }
 
-export function StatsCard({ title, value, change, changeLabel, icon, formatter }: StatsCardProps) {
-  const isPositive = change > 0;
+// Animated Counter Component
+function AnimatedCounter({ value, duration = 2 }: { value: number; duration?: number }) {
+  const [count, setCount] = useState(0);
+  const ref = useRef<HTMLSpanElement>(null);
+  const isInView = useInView(ref, { once: true });
 
-  const formattedValue = formatter ? formatter(value) : value;
+  useEffect(() => {
+    if (!isInView) return;
 
+    const start = 0;
+    const end = value;
+    const increment = end / (duration * 60);
+    let current = start;
+
+    const timer = setInterval(() => {
+      current += increment;
+      if (current >= end) {
+        setCount(end);
+        clearInterval(timer);
+      } else {
+        setCount(Math.floor(current));
+      }
+    }, 1000 / 60);
+
+    return () => clearInterval(timer);
+  }, [value, duration, isInView]);
+
+  return <span ref={ref}>{count.toLocaleString()}</span>;
+}
+
+// Animated Currency Component
+function AnimatedCurrency({ value, duration = 2 }: { value: number; duration?: number }) {
+  const [count, setCount] = useState(0);
+  const ref = useRef<HTMLSpanElement>(null);
+  const isInView = useInView(ref, { once: true });
+
+  useEffect(() => {
+    if (!isInView) return;
+
+    const start = 0;
+    const end = value;
+    const increment = end / (duration * 60);
+    let current = start;
+
+    const timer = setInterval(() => {
+      current += increment;
+      if (current >= end) {
+        setCount(end);
+        clearInterval(timer);
+      } else {
+        setCount(Math.floor(current));
+      }
+    }, 1000 / 60);
+
+    return () => clearInterval(timer);
+  }, [value, duration, isInView]);
+
+  return <span ref={ref}>${count.toLocaleString()}</span>;
+}
+
+// Skeleton Loading Card
+function SkeletonCard() {
   return (
-    <Card className="dashboard-card">
-      <div className="flex justify-between">
-        <div>
-          <p className="text-sm font-medium text-muted-foreground">{title}</p>
-          <h3 className="text-2xl font-bold mt-1">{formattedValue}</h3>
+    <Card className="overflow-hidden">
+      <CardContent className="p-6">
+        <div className="animate-pulse">
+          <div className="flex items-center justify-between mb-4">
+            <div className="w-10 h-10 bg-muted rounded-lg" />
+            <div className="w-16 h-6 bg-muted rounded" />
+          </div>
+          <div className="space-y-2">
+            <div className="w-24 h-4 bg-muted rounded" />
+            <div className="w-32 h-8 bg-muted rounded" />
+          </div>
+          <div className="mt-4 h-12 bg-muted rounded" />
         </div>
-        <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">{icon}</div>
-      </div>
-      <div className="flex items-center mt-3">
-        <div className={cn('flex items-center text-xs font-medium', isPositive ? 'text-crm-success' : 'text-crm-danger')}>
-          {isPositive ? <ArrowUp className="h-3 w-3 mr-1" /> : <ArrowDown className="h-3 w-3 mr-1" />}
-          {Math.abs(change)}%
-        </div>
-        <span className="text-xs text-muted-foreground ml-2">{changeLabel}</span>
-      </div>
+      </CardContent>
     </Card>
   );
 }
 
-export function DashboardStats() {
-  const { fetchWithAuth, user } = useAuth();
-  const [stats, setStats] = useState({ total: 0, newLeads: 0 });
-  const [loadingError, setLoadingError] = useState<string | null>(null);
-  const [ownerTotals, setOwnerTotals] = useState<Record<string, number>>({});
-  const [ownerDailyCounts, setOwnerDailyCounts] = useState<Record<string, Record<string, number>>>({});
-  const [userMap, setUserMap] = useState<Record<string, string>>({});
-  const [dateMode, setDateMode] = useState<'single' | 'range'>('single');
-  const [singleDate, setSingleDate] = useState<Date | undefined>();
-  const [dateRange, setDateRange] = useState<DateRange | undefined>();
-  const [selectedOwners, setSelectedOwners] = useState<string[]>([]);
-  const scanVersion = useRef(0);
+// Sparkline Component
+function Sparkline({ data, color }: { data: number[]; color: string }) {
+  if (data.length === 0) return null;
 
-  useEffect(() => {
-    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-    setLoadingError(null);
-    const loadUsers = async () => {
-      try {
-        const res = await fetchWithAuth(`${API_BASE_URL}/assignable-users`);
-        if (!res.ok) throw new Error('Failed to load users');
-        const data = await res.json();
-        const map: Record<string, string> = {};
-        if (user?.userid && user.name) {
-          map[String(user.userid)] = user.name;
-        }
-        (Array.isArray(data) ? data : []).forEach((u: { userid?: number; name?: string }) => {
-          if (u?.userid && u.name) {
-            map[String(u.userid)] = u.name;
-          }
-        });
-        setUserMap(map);
-      } catch {
-        if (user?.userid && user.name) {
-          setUserMap({ [String(user.userid)]: user.name });
-        }
-      }
-    };
-    void loadUsers();
-  }, [fetchWithAuth, user]);
+  const max = Math.max(...data);
+  const min = Math.min(...data);
+  const range = max - min || 1;
 
-  useEffect(() => {
-    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-    // Frontend background scanner across all pages; no backend changes required
-    const run = async () => {
-      scanVersion.current += 1;
-      const v = scanVersion.current;
-      let total = 0;
-      let newLeads = 0;
-      let cursor: number | null = null;
-      const take = 100; // server allows up to 100
-      const ownerTotalsMap = new Map<string, number>();
-      const ownerPerDayMap = new Map<string, Map<string, number>>();
-
-      const snapshotOwnerTotals = () => Object.fromEntries(ownerTotalsMap);
-      const snapshotOwnerDailyCounts = () => {
-        const obj: Record<string, Record<string, number>> = {};
-        ownerPerDayMap.forEach((ownerMap, dateKey) => {
-          obj[dateKey] = Object.fromEntries(ownerMap);
-        });
-        return obj;
-      };
-
-      const registerLead = (lead: { createdby?: number | string | null; createdat?: string | Date | null }) => {
-        const ownerId = lead.createdby === null || lead.createdby === undefined || lead.createdby === ''
-          ? 'unassigned'
-          : String(lead.createdby);
-        ownerTotalsMap.set(ownerId, (ownerTotalsMap.get(ownerId) ?? 0) + 1);
-
-        if (lead.createdat) {
-          const createdAt = lead.createdat instanceof Date ? lead.createdat : new Date(lead.createdat);
-          if (!isNaN(createdAt.getTime())) {
-            const dateKey = format(createdAt, 'yyyy-MM-dd');
-            const ownerMap = ownerPerDayMap.get(dateKey) ?? new Map<string, number>();
-            ownerMap.set(ownerId, (ownerMap.get(ownerId) ?? 0) + 1);
-            ownerPerDayMap.set(dateKey, ownerMap);
-          }
-        }
-      };
-
-      const publish = () => {
-        if (v !== scanVersion.current) return;
-        setOwnerTotals(snapshotOwnerTotals());
-        setOwnerDailyCounts(snapshotOwnerDailyCounts());
-      };
-
-      try {
-        // First page
-        let res = await fetchWithAuth(`${API_BASE_URL}/crm-leads?take=${take}`);
-        if (!res.ok) throw new Error('Failed to load leads');
-        const data: { items?: { createdat?: string; createdby?: number | string | null }[]; nextCursor?: unknown } | { createdat?: string; createdby?: number | string | null }[] = await res.json();
-        const items: { createdat?: string; createdby?: number | string | null }[] = Array.isArray(data) ? data : (data.items || []);
-        total += items.length;
-        newLeads += items.filter(l => l.createdat && differenceInDays(new Date(), new Date(l.createdat)) <= NEW_LEADS_DAYS_WINDOW).length;
-        items.forEach(registerLead);
-        if (v === scanVersion.current) setStats({ total, newLeads });
-        publish();
-        cursor = Array.isArray(data)
-          ? null
-          : (typeof data.nextCursor === 'number'
-              ? data.nextCursor
-              : (data.nextCursor ? Number(String(data.nextCursor)) : null));
-
-        // Subsequent pages
-        let pages = 0;
-        while (cursor !== null && pages < 200) {
-          if (v !== scanVersion.current) return; // cancelled by new run
-          res = await fetchWithAuth(`${API_BASE_URL}/crm-leads?take=${take}&cursor=${cursor}`);
-          if (!res.ok) {
-            setLoadingError('Some data could not be loaded. Showing partial results.');
-            break;
-          }
-          const data2 = await res.json() as { items?: { createdat?: string; createdby?: number | string | null }[]; nextCursor?: unknown };
-          const items2 = data2.items || [];
-          total += items2.length;
-          newLeads += items2.filter(l => l.createdat && differenceInDays(new Date(), new Date(l.createdat)) <= NEW_LEADS_DAYS_WINDOW).length;
-          items2.forEach(registerLead);
-          cursor = typeof data2.nextCursor === 'number'
-            ? data2.nextCursor
-            : (data2.nextCursor ? Number(String(data2.nextCursor)) : null);
-          pages += 1;
-          if (v === scanVersion.current) setStats({ total, newLeads });
-          publish();
-        }
-      } catch {
-        // keep whatever we had
-      }
-    };
-    run();
-  }, [fetchWithAuth, user]);
-
-  const formatCurrency = (value: number | string) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      maximumFractionDigits: 0,
-    }).format(Number(value));
-  };
-
-  const hasActiveSingle = dateMode === 'single' && !!singleDate;
-  const hasActiveRange = dateMode === 'range' && !!dateRange?.from && !!dateRange?.to;
-
-  const activeTotals = useMemo(() => {
-    if (dateMode === 'single' && singleDate) {
-      const key = format(singleDate, 'yyyy-MM-dd');
-      return ownerDailyCounts[key] ?? {};
-    }
-    if (dateMode === 'range' && dateRange?.from && dateRange?.to) {
-      const rangeTotals: Record<string, number> = {};
-      const days = eachDayOfInterval({ start: dateRange.from, end: dateRange.to });
-      for (const day of days) {
-        const key = format(day, 'yyyy-MM-dd');
-        const countsForDay = ownerDailyCounts[key];
-        if (!countsForDay) continue;
-        Object.entries(countsForDay).forEach(([ownerId, count]) => {
-          rangeTotals[ownerId] = (rangeTotals[ownerId] ?? 0) + count;
-        });
-      }
-      return rangeTotals;
-    }
-    return ownerTotals;
-  }, [dateMode, dateRange, ownerDailyCounts, ownerTotals, singleDate]);
-
-  const ownerOptions = useMemo(() => {
-    return Object.entries(userMap)
-      .map(([ownerId, ownerName]) => ({ ownerId, ownerName }))
-      .sort((a, b) => a.ownerName.localeCompare(b.ownerName));
-  }, [userMap]);
-
-  const ownerCounts = useMemo(() => {
-    return Object.entries(activeTotals)
-      .filter(([ownerId]) =>
-        selectedOwners.length ? selectedOwners.includes(ownerId) : true
-      )
-      .map(([ownerId, count]) => ({
-        ownerId,
-        ownerName:
-          ownerId === 'unassigned'
-            ? 'Unassigned'
-            : userMap[ownerId] || `User ${ownerId}`,
-        count,
-      }))
-      .sort((a, b) => b.count - a.count);
-  }, [activeTotals, selectedOwners, userMap]);
-
-  const ownerFilterLabel = useMemo(() => {
-    if (!selectedOwners.length) return 'All owners';
-    if (selectedOwners.length === 1) {
-      const ownerId = selectedOwners[0];
-      const name = ownerId === 'unassigned'
-        ? 'Unassigned'
-        : userMap[ownerId] || `User ${ownerId}`;
-      return `Owner: ${name}`;
-    }
-    return `${selectedOwners.length} owners selected`;
-  }, [selectedOwners, userMap]);
-
-  const selectedFilterLabel = useMemo(() => {
-    let dateLabel: string;
-    if (dateMode === 'single' && singleDate) {
-      dateLabel = `Leads created on ${format(singleDate, 'PPP')}`;
-    } else if (dateMode === 'range' && dateRange?.from && dateRange?.to) {
-      dateLabel = `Leads created between ${format(dateRange.from, 'PPP')} and ${format(dateRange.to, 'PPP')}`;
-    } else {
-      dateLabel = 'All dates';
-    }
-    return `${dateLabel} • ${ownerFilterLabel}`;
-  }, [dateMode, dateRange, ownerFilterLabel, singleDate]);
-
-  const hasActiveFilter = hasActiveSingle || hasActiveRange || selectedOwners.length > 0;
+  const points = data.map((value, index) => {
+    const x = (index / (data.length - 1)) * 100;
+    const y = 100 - ((value - min) / range) * 100;
+    return `${x},${y}`;
+  }).join(' ');
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatsCard title="Total Leads" value={stats.total} change={0} changeLabel="" icon={<Users className="h-5 w-5" />} />
-        <StatsCard title="New Leads" value={stats.newLeads} change={0} changeLabel="" icon={<UserPlus className="h-5 w-5" />} />
-        <StatsCard title="Revenue" value={54200} change={8} changeLabel="since last month" icon={<DollarSign className="h-5 w-5" />} formatter={formatCurrency} />
-        <StatsCard title="Open Tickets" value={32} change={-15} changeLabel="since last week" icon={<Ticket className="h-5 w-5" />} />
-      </div>
+    <svg 
+      viewBox="0 0 100 40" 
+      className="w-full h-12" 
+      preserveAspectRatio="none"
+    >
+      <motion.polyline
+        points={points}
+        fill="none"
+        stroke={color}
+        strokeWidth="2"
+        initial={{ pathLength: 0, opacity: 0 }}
+        animate={{ pathLength: 1, opacity: 1 }}
+        transition={{ duration: 1.5, ease: "easeInOut" }}
+      />
+      <defs>
+        <linearGradient id={`gradient-${color}`} x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stopColor={color} stopOpacity="0.2" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <motion.polygon
+        points={`0,100 ${points} 100,100`}
+        fill={`url(#gradient-${color})`}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 1.5, ease: "easeInOut", delay: 0.3 }}
+      />
+    </svg>
+  );
+}
 
-      <Card>
-        <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <CardTitle className="text-xl">Count of Leads</CardTitle>
-            <CardDescription>{selectedFilterLabel}</CardDescription>
-          </div>
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-3">
-            <ToggleGroup
-              type="single"
-              value={dateMode}
-              onValueChange={value => value && setDateMode(value as 'single' | 'range')}
-              className="justify-start"
-            >
-              <ToggleGroupItem value="single">Single Day</ToggleGroupItem>
-              <ToggleGroupItem value="range">Range</ToggleGroupItem>
-            </ToggleGroup>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="w-[220px] justify-start">
-                  {selectedOwners.length
-                    ? `${selectedOwners.length} owner${selectedOwners.length > 1 ? 's' : ''}`
-                    : 'All owners'}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-56">
-                <DropdownMenuLabel>Select owners</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                {ownerOptions.map(({ ownerId, ownerName }) => (
-                  <DropdownMenuCheckboxItem
-                    key={ownerId}
-                    checked={selectedOwners.includes(ownerId)}
-                    onCheckedChange={checked => {
-                      const isChecked = checked === true;
-                      setSelectedOwners(prev => {
-                        if (isChecked) {
-                          return prev.includes(ownerId) ? prev : [...prev, ownerId];
-                        }
-                        return prev.filter(id => id !== ownerId);
-                      });
+// Main StatCard Component
+function StatCard({ data, index }: { data: StatCardData; index: number }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const isInView = useInView(ref, { once: true, margin: "-100px" });
+
+  const cardVariants: Variants = {
+    hidden: { 
+      opacity: 0, 
+      y: 50,
+      scale: 0.9
+    },
+    visible: { 
+      opacity: 1, 
+      y: 0,
+      scale: 1,
+      transition: {
+        duration: 0.5,
+        delay: index * 0.1,
+        ease: "easeInOut"
+      }
+    }
+  };
+
+  const iconVariants: Variants = {
+    hidden: { scale: 0, rotate: -180 },
+    visible: { 
+      scale: 1, 
+      rotate: 0,
+      transition: {
+        type: "spring",
+        stiffness: 260,
+        damping: 20,
+        delay: index * 0.1 + 0.2
+      }
+    }
+  };
+
+  const changeVariants = {
+    hidden: { x: -20, opacity: 0 },
+    visible: { 
+      x: 0, 
+      opacity: 1,
+      transition: {
+        delay: index * 0.1 + 0.4
+      }
+    }
+  };
+
+  return (
+    <motion.div
+      ref={ref}
+      variants={cardVariants}
+      initial="hidden"
+      animate={isInView ? "visible" : "hidden"}
+    >
+      <motion.div
+        whileHover={{ 
+          scale: 1.03,
+          boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)"
+        }}
+        transition={{ type: "spring", stiffness: 400, damping: 17 }}
+      >
+        <Card className="overflow-hidden relative group cursor-pointer">
+          {/* Animated gradient background on hover */}
+          <motion.div
+            className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500"
+            style={{
+              background: `linear-gradient(135deg, ${data.bgColor}15 0%, ${data.bgColor}05 100%)`
+            }}
+          />
+
+          <CardContent className="p-6 relative z-10">
+            <div className="flex items-center justify-between mb-4">
+              <motion.div 
+                variants={iconVariants}
+                className={cn(
+                  "p-3 rounded-xl shadow-sm",
+                  "group-hover:shadow-md transition-shadow duration-300"
+                )}
+                style={{ backgroundColor: `${data.bgColor}20` }}
+              >
+                <motion.div
+                  whileHover={{ rotate: 360 }}
+                  transition={{ duration: 0.6 }}
+                  style={{ color: data.color }}
+                >
+                  {data.icon}
+                </motion.div>
+              </motion.div>
+
+              <motion.div 
+                variants={changeVariants}
+                className={cn(
+                  "flex items-center gap-1 text-sm font-semibold px-2.5 py-1 rounded-full",
+                  data.change >= 0 
+                    ? "bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-400" 
+                    : "bg-red-100 text-red-700 dark:bg-red-950/30 dark:text-red-400"
+                )}
+              >
+                {data.change >= 0 ? (
+                  <motion.div
+                    initial={{ y: 5 }}
+                    animate={{ y: [-2, 2, -2] }}
+                    transition={{ 
+                      repeat: Infinity, 
+                      duration: 1.5,
+                      ease: "easeInOut"
                     }}
                   >
-                    {ownerName}
-                  </DropdownMenuCheckboxItem>
-                ))}
-                <DropdownMenuCheckboxItem
-                  checked={selectedOwners.includes('unassigned')}
-                  onCheckedChange={checked => {
-                    const isChecked = checked === true;
-                    setSelectedOwners(prev => {
-                      if (isChecked) {
-                        return prev.includes('unassigned') ? prev : [...prev, 'unassigned'];
-                      }
-                      return prev.filter(id => id !== 'unassigned');
-                    });
-                  }}
-                >
-                  Unassigned
-                </DropdownMenuCheckboxItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onSelect={event => {
-                    event.preventDefault();
-                    setSelectedOwners([]);
-                  }}
-                >
-                  Clear selection
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  className="min-w-[280px] justify-start whitespace-normal text-left font-normal leading-tight"
-                  title={
-                    dateMode === 'single'
-                      ? singleDate
-                        ? format(singleDate, 'PPP')
-                        : 'Pick a date'
-                      : dateRange?.from && dateRange.to
-                        ? `${format(dateRange.from, 'PPP')} - ${format(dateRange.to, 'PPP')}`
-                        : 'Pick a date range'
-                  }
-                >
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {dateMode === 'single'
-                    ? singleDate
-                      ? format(singleDate, 'PPP')
-                      : 'Pick a date'
-                    : dateRange?.from && dateRange.to
-                      ? `${format(dateRange.from, 'PPP')} - ${format(dateRange.to, 'PPP')}`
-                      : 'Pick a date range'}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="end">
-                <Calendar
-                  initialFocus
-                  mode={dateMode === 'single' ? 'single' : 'range'}
-                  selected={dateMode === 'single' ? singleDate : dateRange}
-                  onSelect={value => {
-                    if (dateMode === 'single') {
-                      setSingleDate(value as Date | undefined);
-                    } else {
-                      setDateRange(value as DateRange | undefined);
-                    }
-                  }}
-                  numberOfMonths={1}
-                />
-              </PopoverContent>
-            </Popover>
-            {hasActiveFilter && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setSingleDate(undefined);
-                  setDateRange(undefined);
-                  setSelectedOwners([]);
-                }}
-              >
-                Clear
-              </Button>
+                    <ArrowUp className="h-3.5 w-3.5" />
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    initial={{ y: -5 }}
+                    animate={{ y: [2, -2, 2] }}
+                    transition={{ 
+                      repeat: Infinity, 
+                      duration: 1.5,
+                      ease: "easeInOut"
+                    }}
+                  >
+                    <ArrowDown className="h-3.5 w-3.5" />
+                  </motion.div>
+                )}
+                <span>{Math.abs(data.change)}%</span>
+              </motion.div>
+            </div>
+
+            <motion.div 
+              className="space-y-1"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: index * 0.1 + 0.5 }}
+            >
+              <p className="text-sm text-muted-foreground font-medium">
+                {data.title}
+              </p>
+              <p className="text-3xl font-bold tracking-tight">
+                {data.title.toLowerCase().includes('revenue') || data.title.toLowerCase().includes('value') ? (
+                  <AnimatedCurrency value={data.value} duration={2} />
+                ) : (
+                  <AnimatedCounter value={data.value} duration={2} />
+                )}
+              </p>
+              <p className="text-xs text-muted-foreground">{data.changeLabel}</p>
+            </motion.div>
+
+            {/* Sparkline */}
+            <motion.div 
+              className="mt-4"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.1 + 0.7 }}
+            >
+              <Sparkline data={data.trend} color={data.color} />
+            </motion.div>
+          </CardContent>
+
+          {/* Shimmer effect */}
+          <motion.div
+            className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/10 to-transparent"
+            animate={{ x: ["100%", "-100%"] }}
+            transition={{
+              repeat: Infinity,
+              duration: 3,
+              ease: "linear",
+              repeatDelay: 5
+            }}
+          />
+        </Card>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+export function DashboardStats() {
+  const { fetchWithAuth } = useAuth();
+  const { toast } = useToast();
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<StatCardData[]>([]);
+  const [timeframe, setTimeframe] = useState<'day' | 'week' | 'month'>('week');
+  const [dateRange, setDateRange] = useState<DateRange | undefined>();
+
+  // Format date range for display
+  const formatDateRange = (range: DateRange | undefined) => {
+    if (!range?.from) return 'Custom';
+    if (!range.to) return format(range.from, 'MMM dd, yyyy');
+    return `${format(range.from, 'MMM dd')} - ${format(range.to, 'MMM dd, yyyy')}`;
+  };
+
+  // Clear date range
+  const clearDateRange = () => {
+    setDateRange(undefined);
+    setTimeframe('week');
+  };
+
+  useEffect(() => {
+    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+    let cancelled = false;
+
+    const load = async () => {
+      setLoading(true);
+      try {
+        const allLeads: any[] = [];
+        let cursor: number | null = null;
+
+        const firstRes = await fetchWithAuth(`${API_BASE_URL}/crm-leads?take=100`);
+        if (!firstRes.ok) throw new Error('Failed to load leads');
+        
+        const firstData = await firstRes.json();
+        const firstItems = Array.isArray(firstData) ? firstData : firstData.items || [];
+        allLeads.push(...firstItems);
+        
+        cursor = Array.isArray(firstData) ? null : firstData.nextCursor;
+
+        while (cursor !== null && allLeads.length < 1000) {
+          const res = await fetchWithAuth(`${API_BASE_URL}/crm-leads?take=100&cursor=${cursor}`);
+          if (!res.ok) break;
+          
+          const data = await res.json();
+          allLeads.push(...(data.items || []));
+          cursor = data.nextCursor;
+        }
+
+        if (!cancelled) {
+          const totalLeads = allLeads.length;
+          const newLeads = allLeads.filter(l => {
+            const created = new Date(l.createdat || l.created_at);
+            const daysAgo = differenceInDays(new Date(), created);
+            return daysAgo <= NEW_LEADS_DAYS_WINDOW;
+          }).length;
+
+          const closedDeals = allLeads.filter(l => 
+            l.status === 'Closed Won' || l.stage === 'Closed'
+          ).length;
+
+          const totalRevenue = allLeads.reduce((sum, l) => {
+            const amount = parseFloat(l.signedamount || l.amount || '0');
+            return sum + amount;
+          }, 0);
+
+          const generateTrend = () => Array.from({ length: 7 }, () => Math.random() * 100 + 50);
+
+          const statsData: StatCardData[] = [
+            {
+              title: 'Total Leads',
+              value: totalLeads,
+              change: 12.5,
+              changeLabel: 'vs last period',
+              icon: <Users className="h-5 w-5" />,
+              color: '#3b82f6',
+              bgColor: '#3b82f6',
+              trend: generateTrend()
+            },
+            {
+              title: 'New Leads',
+              value: newLeads,
+              change: 8.2,
+              changeLabel: `Last ${NEW_LEADS_DAYS_WINDOW} days`,
+              icon: <UserPlus className="h-5 w-5" />,
+              color: '#22c55e',
+              bgColor: '#22c55e',
+              trend: generateTrend()
+            },
+            {
+              title: 'Closed Deals',
+              value: closedDeals,
+              change: -3.1,
+              changeLabel: 'vs last period',
+              icon: <Ticket className="h-5 w-5" />,
+              color: '#f59e0b',
+              bgColor: '#f59e0b',
+              trend: generateTrend()
+            },
+            {
+              title: 'Total Revenue',
+              value: Math.floor(totalRevenue),
+              change: 15.8,
+              changeLabel: 'vs last period',
+              icon: <DollarSign className="h-5 w-5" />,
+              color: '#8b5cf6',
+              bgColor: '#8b5cf6',
+              trend: generateTrend()
+            }
+          ];
+
+          setStats(statsData);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          toast({
+            variant: 'destructive',
+            title: 'Failed to load stats',
+            description: err instanceof Error ? err.message : 'Unknown error',
+          });
+        }
+      } finally {
+        if (!cancelled) {
+          setTimeout(() => setLoading(false), 500);
+        }
+      }
+    };
+
+    load();
+    return () => { cancelled = true; };
+  }, [fetchWithAuth, timeframe, dateRange, toast]);
+
+  return (
+    <div className="space-y-4">
+      {/* Controls */}
+      <motion.div 
+        className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4"
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+      >
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">Key Metrics</h2>
+          <p className="text-muted-foreground text-sm">
+            Track your sales performance
+            {dateRange?.from && (
+              <span className="ml-2 text-blue-600 dark:text-blue-400 font-medium">
+                • {formatDateRange(dateRange)}
+              </span>
             )}
-          </div>
-        </CardHeader>
-        <CardContent>
-          {loadingError && (
-            <div className="mb-3 flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-              <AlertTriangle className="h-4 w-4 text-destructive" />
-              <span>{loadingError}</span>
-            </div>
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {!dateRange?.from && (
+            <ToggleGroup 
+              type="single" 
+              value={timeframe} 
+              onValueChange={(v) => v && setTimeframe(v as any)}
+              className="border rounded-lg bg-white dark:bg-gray-900"
+            >
+              <ToggleGroupItem 
+                value="day" 
+                aria-label="Day"
+                className="data-[state=on]:bg-blue-500 data-[state=on]:text-white"
+              >
+                Day
+              </ToggleGroupItem>
+              <ToggleGroupItem 
+                value="week" 
+                aria-label="Week"
+                className="data-[state=on]:bg-blue-500 data-[state=on]:text-white"
+              >
+                Week
+              </ToggleGroupItem>
+              <ToggleGroupItem 
+                value="month" 
+                aria-label="Month"
+                className="data-[state=on]:bg-blue-500 data-[state=on]:text-white"
+              >
+                Month
+              </ToggleGroupItem>
+            </ToggleGroup>
           )}
-          {ownerCounts.length ? (
-            <div className="divide-y">
-              {ownerCounts.map(({ ownerId, ownerName, count }) => (
-                <div key={ownerId} className="flex items-center justify-between py-2">
-                  <span className="text-sm font-medium">{ownerName}</span>
-                  <span className="text-sm text-muted-foreground">{count}</span>
+
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button 
+                variant={dateRange?.from ? "default" : "outline"}
+                size="sm"
+                className={cn(
+                  "min-w-[200px] justify-start text-left font-medium transition-all duration-300",
+                  dateRange?.from 
+                    ? "bg-gradient-to-r from-blue-500 to-purple-500 text-white hover:from-blue-600 hover:to-purple-600 shadow-lg hover:shadow-xl" 
+                    : "hover:border-blue-400 dark:hover:border-blue-600"
+                )}
+              >
+                <CalendarIcon className="h-4 w-4 mr-2" />
+                {formatDateRange(dateRange)}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="end">
+              <div className="p-3 border-b">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold">Select Date Range</p>
+                  {dateRange?.from && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={clearDateRange}
+                      className="h-8 px-2 text-xs hover:bg-red-100 dark:hover:bg-red-950/30 hover:text-red-600"
+                    >
+                      <X className="h-3 w-3 mr-1" />
+                      Clear
+                    </Button>
+                  )}
                 </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              {hasActiveFilter ? 'No leads found for the selected filter.' : 'No leads found yet.'}
-            </p>
+                {dateRange?.from && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {formatDateRange(dateRange)}
+                  </p>
+                )}
+              </div>
+              <Calendar
+                mode="range"
+                selected={dateRange}
+                onSelect={setDateRange}
+                numberOfMonths={2}
+                className="rounded-md"
+              />
+              <div className="p-3 border-t bg-muted/50">
+                <p className="text-xs text-muted-foreground text-center">
+                  Select start and end dates to filter data
+                </p>
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {dateRange?.from && (
+            <motion.div
+              initial={{ scale: 0, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0, opacity: 0 }}
+            >
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={clearDateRange}
+                className="border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 hover:border-red-400 dark:hover:border-red-600"
+              >
+                <X className="h-4 w-4 mr-1" />
+                Clear Filter
+              </Button>
+            </motion.div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </motion.div>
+
+      {/* Stats Cards */}
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <SkeletonCard key={i} />
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {stats.map((stat, index) => (
+            <StatCard key={index} data={stat} index={index} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

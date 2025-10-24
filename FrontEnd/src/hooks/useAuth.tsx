@@ -40,11 +40,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-  console.log(API_BASE_URL);
+  const rawApiBase = import.meta.env.VITE_API_BASE_URL as string | undefined;
+  const API_BASE_URL = rawApiBase ? rawApiBase.replace(/\/+$/, "") : undefined;
+  if (!API_BASE_URL && import.meta.env.DEV) {
+    // Helpful warning during development when env is misconfigured
+    // eslint-disable-next-line no-console
+    console.warn("VITE_API_BASE_URL is not set. API calls using relative paths must be absolute in this environment.");
+  }
+
+  const buildUrl = (pathOrUrl: string) => {
+    try {
+      // If input is already an absolute URL, return as-is
+      const u = new URL(pathOrUrl);
+      return u.toString();
+    } catch {
+      // Not absolute — require API_BASE_URL to be defined to build a full URL
+      if (!API_BASE_URL) return pathOrUrl; // leave as-is so fetch will fail visibly
+      return `${API_BASE_URL}${pathOrUrl.startsWith("/") ? "" : "/"}${pathOrUrl}`;
+    }
+  };
   const login = async (email: string, password: string) => {
     const lower = email.toLowerCase();
-    const res = await fetch(`${API_BASE_URL}/login`, {
+  const res = await fetch(buildUrl("/login"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: lower, password })
@@ -140,7 +157,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshToken = async (): Promise<boolean> => {
     if (!refreshTokenValue) return false;
     try {
-      const res = await fetch(`${API_BASE_URL}/refresh`, {
+  const res = await fetch(buildUrl("/refresh"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refreshToken: refreshTokenValue })
@@ -163,7 +180,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshUser = async () => {
     if (!token) return;
-    const res = await fetchWithAuth(`${API_BASE_URL}/me`);
+  const res = await fetchWithAuth(buildUrl("/me"));
     if (res.ok) {
       const data = await res.json();
       setUser(data);
