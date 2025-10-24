@@ -10,6 +10,7 @@ import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
 import { useToast } from '@/hooks/use-toast';
 import { TrendingUp, TrendingDown, Activity, BarChart3 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useDataService } from '@/hooks/useDataService';
 
 const FETCH_PAGE_SIZE = 100;
 const DAY_POINTS = 14;
@@ -60,10 +61,12 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 
 export function LeadsTrendChart() {
   const { fetchWithAuth } = useAuth();
+  const { fetchAllLeads } = useDataService();
   const { toast } = useToast();
   const [timeframe, setTimeframe] = useState<Timeframe>('month');
   const [leads, setLeads] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [chartType, setChartType] = useState<'line' | 'area'>('area');
   const ref = useRef(null);
   const isInView = useInView(ref, { once: true });
@@ -75,31 +78,36 @@ export function LeadsTrendChart() {
 
     const load = async () => {
       setLoading(true);
+      setError(null);
       try {
-        const allLeads: any[] = [];
-        let cursor: number | null = null;
-        let pages = 0;
+        const allLeads = await fetchAllLeads();
 
-        const firstRes = await fetchWithAuth(`${API_BASE_URL}/crm-leads?take=${FETCH_PAGE_SIZE}`);
-        if (!firstRes.ok) throw new Error('Failed to load leads');
+        // <=======================uncomment for dynamic data=======================>
+        
+        // const allLeads: any[] = [];
+        // let cursor: number | null = null;
+        // let pages = 0;
 
-        const firstData = await firstRes.json();
-        const firstItems = Array.isArray(firstData) ? firstData : firstData.items || [];
-        allLeads.push(...firstItems);
+        // const firstRes = await fetchWithAuth(`${API_BASE_URL}/crm-leads?take=${FETCH_PAGE_SIZE}`);
+        // if (!firstRes.ok) throw new Error('Failed to load leads');
 
-        cursor = Array.isArray(firstData) ? null : firstData.nextCursor;
+        // const firstData = await firstRes.json();
+        // const firstItems = Array.isArray(firstData) ? firstData : firstData.items || [];
+        // allLeads.push(...firstItems);
 
-        while (cursor !== null && pages < 200) {
-          const res = await fetchWithAuth(`${API_BASE_URL}/crm-leads?take=${FETCH_PAGE_SIZE}&cursor=${cursor}`);
-          if (!res.ok) break;
+        // cursor = Array.isArray(firstData) ? null : firstData.nextCursor;
 
-          const data = await res.json();
-          const items = data.items || [];
-          allLeads.push(...items);
+        // while (cursor !== null && pages < 200) {
+        //   const res = await fetchWithAuth(`${API_BASE_URL}/crm-leads?take=${FETCH_PAGE_SIZE}&cursor=${cursor}`);
+        //   if (!res.ok) break;
 
-          cursor = data.nextCursor;
-          pages += 1;
-        }
+        //   const data = await res.json();
+        //   const items = data.items || [];
+        //   allLeads.push(...items);
+
+        //   cursor = data.nextCursor;
+        //   pages += 1;
+        // }
 
         if (!cancelled) {
           setLeads(allLeads);

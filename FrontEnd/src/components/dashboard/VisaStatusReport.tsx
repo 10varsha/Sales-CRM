@@ -4,19 +4,82 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { Download, Filter } from 'lucide-react';
+import { useDataService } from '@/hooks/useDataService';
 
-// Softer, more accessible color palette
-const COLORS = ['#FF9AA2', '#FFB7B2', '#FFDAC1', '#E2F0CB', '#B5EAD7', '#C7CEEA', '#FFD3E1', '#FFAAA5'];
+// Visa category colors
+const VISA_COLORS: Record<string, string> = {
+  'F-1 Visa': '#3B82F6',      // Blue
+  'F-1 OPT': '#10B981',       // Green
+  'STEM OPT': '#8B5CF6',      // Purple
+  'H-1B Visa': '#F59E0B',     // Amber
+  'Green Card': '#EF4444',    // Red
+  'Other': '#6B7280',         // Gray
+  'Unknown': '#9CA3AF'        // Light Gray
+};
+
+const COLORS = Object.values(VISA_COLORS);
 
 interface VisaData {
   visaType: string;
   leads: number;
   converted: number;
 }
+
+// Normalize visa types to standard categories
+const normalizeVisaType = (visaType: string): string => {
+  if (!visaType) return 'Unknown';
+  
+  const normalized = visaType.toLowerCase().trim();
+  
+  // F-1 Visa (student visa without OPT)
+  if (normalized.includes('f-1') || normalized.includes('f1')) {
+    if (normalized.includes('stem') || normalized.includes('stem opt')) {
+      return 'STEM OPT';
+    } else if (normalized.includes('opt') && !normalized.includes('stem')) {
+      return 'F-1 OPT';
+    }
+    return 'F-1 Visa';
+  }
+  
+  // OPT categories
+  if (normalized.includes('stem opt') || normalized.includes('stem-opt')) {
+    return 'STEM OPT';
+  }
+  if (normalized.includes('opt')) {
+    return 'F-1 OPT';
+  }
+  
+  // H-1B Visa
+  if (normalized.includes('h-1b') || normalized.includes('h1b') || 
+      normalized.includes('h-1') || normalized.includes('h1')) {
+    return 'H-1B Visa';
+  }
+  
+  // Green Card
+  if (normalized.includes('green card') || normalized.includes('greencard') || 
+      normalized.includes('permanent resident') || normalized.includes('pr') ||
+      normalized.includes('eb-1') || normalized.includes('eb-2') || 
+      normalized.includes('eb-3') || normalized.includes('eb1') || 
+      normalized.includes('eb2') || normalized.includes('eb3')) {
+    return 'Green Card';
+  }
+  
+  // Other common visa types
+  if (normalized.includes('l-1') || normalized.includes('l1') ||
+      normalized.includes('o-1') || normalized.includes('o1') ||
+      normalized.includes('e-2') || normalized.includes('e2') ||
+      normalized.includes('tn') || normalized.includes('j-1') || 
+      normalized.includes('j1')) {
+    return 'Other';
+  }
+  
+  return 'Unknown';
+};
 
 function SkeletonLoader() {
   return (
@@ -31,7 +94,6 @@ function SkeletonLoader() {
   );
 }
 
-// Custom Tooltip Component with proper dark mode support
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
     return (
@@ -55,6 +117,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 
 export function VisaStatusReport() {
   const { fetchWithAuth } = useAuth();
+  const { fetchAllLeads } = useDataService();
   const { toast } = useToast();
   const [timeFilter, setTimeFilter] = useState('all');
   const [groupBy, setGroupBy] = useState('visa');
@@ -70,31 +133,38 @@ export function VisaStatusReport() {
     const load = async () => {
       setLoading(true);
       try {
-        const allLeads: any[] = [];
-        let cursor: number | null = null;
-
-        const firstRes = await fetchWithAuth(`${API_BASE_URL}/crm-leads?take=100`);
-        if (!firstRes.ok) throw new Error('Failed to load leads');
-        
-        const firstData = await firstRes.json();
-        const firstItems = Array.isArray(firstData) ? firstData : firstData.items || [];
-        allLeads.push(...firstItems);
-        
-        cursor = Array.isArray(firstData) ? null : firstData.nextCursor;
-
-        // Fetch all pages
-        while (cursor !== null && allLeads.length < 2000) {
-          const res = await fetchWithAuth(`${API_BASE_URL}/crm-leads?take=100&cursor=${cursor}`);
-          if (!res.ok) break;
-          
-          const data = await res.json();
-          allLeads.push(...(data.items || []));
-          cursor = data.nextCursor;
-        }
+        const allLeads = await fetchAllLeads();
 
         if (!cancelled) {
           setLeads(allLeads);
         }
+
+        // <=======================uncomment for dynamic data=======================>
+        
+        // const allLeads: any[] = [];
+        // let cursor: number | null = null;
+
+        // const firstRes = await fetchWithAuth(`${API_BASE_URL}/crm-leads?take=100`);
+        // if (!firstRes.ok) throw new Error('Failed to load leads');
+        
+        // const firstData = await firstRes.json();
+        // const firstItems = Array.isArray(firstData) ? firstData : firstData.items || [];
+        // allLeads.push(...firstItems);
+        
+        // cursor = Array.isArray(firstData) ? null : firstData.nextCursor;
+
+        // while (cursor !== null && allLeads.length < 2000) {
+        //   const res = await fetchWithAuth(`${API_BASE_URL}/crm-leads?take=100&cursor=${cursor}`);
+        //   if (!res.ok) break;
+          
+        //   const data = await res.json();
+        //   allLeads.push(...(data.items || []));
+        //   cursor = data.nextCursor;
+        // }
+
+        // if (!cancelled) {
+        //   setLeads(allLeads);
+        // }
       } catch (err) {
         if (!cancelled) {
           toast({
@@ -112,16 +182,15 @@ export function VisaStatusReport() {
 
     load();
     return () => { cancelled = true; };
-  }, [fetchWithAuth, toast, timeFilter]); // Re-fetch when timeFilter changes
+  }, [fetchWithAuth, toast, timeFilter]);
 
   const visaData = useMemo(() => {
     const visaMap = new Map<string, { leads: number; converted: number }>();
 
     leads.forEach(lead => {
-      // Handle multiple possible field names for visa type
-      const visaType = lead.visatype || lead.visa_type || lead.visaType || lead.category || 'Unknown';
+      const rawVisaType = lead.visatype || lead.visa_type || lead.visaType || lead.category || '';
+      const visaType = normalizeVisaType(rawVisaType);
       
-      // Check if lead is converted based on multiple possible status fields
       const status = lead.status || lead.stage || '';
       const isConverted = 
         status.toLowerCase().includes('closed won') || 
@@ -137,12 +206,18 @@ export function VisaStatusReport() {
       });
     });
 
-    return Array.from(visaMap.entries())
-      .map(([visaType, stats]) => ({
-        visaType,
-        ...stats,
-      }))
-      .sort((a, b) => b.leads - a.leads);
+    // Define order
+    const visaOrder = ['F-1 Visa', 'F-1 OPT', 'STEM OPT', 'H-1B Visa', 'Green Card', 'Other', 'Unknown'];
+    
+    return visaOrder
+      .map(visaType => {
+        const stats = visaMap.get(visaType) || { leads: 0, converted: 0 };
+        return {
+          visaType,
+          ...stats,
+        };
+      })
+      .filter(item => item.leads > 0);
   }, [leads]);
 
   const totalLeads = visaData.reduce((sum, v) => sum + v.leads, 0);
@@ -157,7 +232,6 @@ export function VisaStatusReport() {
       transition={{ duration: 0.5 }}
     >
       <Card className="h-full flex flex-col relative overflow-hidden border shadow-lg bg-gradient-to-br from-orange-50/30 via-white to-pink-50/30 dark:from-orange-950/10 dark:via-gray-950 dark:to-pink-950/10">
-        {/* Subtle animated background - much more toned down */}
         <div className="absolute inset-0 opacity-20 dark:opacity-10">
           <div className="absolute top-0 left-0 w-64 h-64 bg-gradient-to-br from-orange-200/20 to-pink-200/20 dark:from-orange-800/10 dark:to-pink-800/10 rounded-full filter blur-3xl animate-blob" />
           <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-rose-200/20 to-orange-200/20 dark:from-rose-800/10 dark:to-orange-800/10 rounded-full filter blur-3xl animate-blob animation-delay-2000" />
@@ -165,60 +239,55 @@ export function VisaStatusReport() {
         </div>
 
         <CardHeader className="relative z-10">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
             <div className="space-y-1">
-            <CardTitle className="text-2xl font-bold bg-gradient-to-r from-orange-600 to-pink-600 dark:from-orange-400 dark:to-pink-400 bg-clip-text text-transparent">
+              <CardTitle className="text-2xl font-bold bg-gradient-to-r from-orange-600 to-pink-600 dark:from-orange-400 dark:to-pink-400 bg-clip-text text-transparent">
                 Visa Status Report
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">
+              </CardTitle>
+              <p className="text-sm text-muted-foreground">
                 Track visa applications by type • {totalLeads} total leads
-            </p>
+              </p>
             </div>
-            
-            {/* Fixed button container - keeps buttons on same line */}
             <div className="flex items-center gap-2 shrink-0">
-            <Button 
+              <Button 
                 variant="outline" 
                 size="sm"
                 className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm hover:bg-orange-50 dark:hover:bg-orange-950/30 border-orange-300/50 dark:border-orange-800/50 text-orange-700 dark:text-orange-400 font-semibold shadow-md hover:shadow-lg transition-all duration-300 hover:scale-105 whitespace-nowrap"
                 onClick={() => {
-                toast({
+                  toast({
                     title: "Export feature",
                     description: "CSV export will be available soon",
-                });
+                  });
                 }}
-            >
+              >
                 <Download className="h-4 w-4 mr-2" />
                 Export
-            </Button>
-            
-            <Select value={timeFilter} onValueChange={setTimeFilter}>
+              </Button>
+              <Select value={timeFilter} onValueChange={setTimeFilter}>
                 <SelectTrigger className="w-[120px] bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm border-orange-300/50 dark:border-orange-800/50 font-semibold shadow-md hover:shadow-lg transition-all duration-300 hover:border-orange-400 dark:hover:border-orange-600">
-                <SelectValue />
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                <SelectItem value="all">All Time</SelectItem>
-                <SelectItem value="day">Today</SelectItem>
-                <SelectItem value="week">This Week</SelectItem>
-                <SelectItem value="month">This Month</SelectItem>
+                  <SelectItem value="all">All Time</SelectItem>
+                  <SelectItem value="day">Today</SelectItem>
+                  <SelectItem value="week">This Week</SelectItem>
+                  <SelectItem value="month">This Month</SelectItem>
                 </SelectContent>
-            </Select>
-            
-            <Select value={groupBy} onValueChange={setGroupBy}>
+              </Select>
+              <Select value={groupBy} onValueChange={setGroupBy}>
                 <SelectTrigger className="w-[120px] bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm border-orange-300/50 dark:border-orange-800/50 font-semibold shadow-md hover:shadow-lg transition-all duration-300 hover:border-orange-400 dark:hover:border-orange-600">
-                <Filter className="h-4 w-4 mr-2" />
-                <SelectValue />
+                  <Filter className="h-4 w-4 mr-2" />
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                <SelectItem value="visa">By Visa</SelectItem>
-                <SelectItem value="stage">By Stage</SelectItem>
-                <SelectItem value="team">By Team</SelectItem>
+                  <SelectItem value="visa">By Visa</SelectItem>
+                  <SelectItem value="stage">By Stage</SelectItem>
+                  <SelectItem value="team">By Team</SelectItem>
                 </SelectContent>
-            </Select>
+              </Select>
             </div>
-        </div>
+          </div>
         </CardHeader>
-
 
         <CardContent className="flex-1 relative z-10">
           {loading ? (
@@ -251,8 +320,15 @@ export function VisaStatusReport() {
 
                 <TabsContent value="bar" className="h-[320px]">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={visaData}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-orange-200/40 dark:stroke-orange-800/40" />
+                    <BarChart 
+                      data={visaData}
+                      style={{ backgroundColor: 'transparent' }} // Add this
+                    >
+                      <CartesianGrid 
+                        strokeDasharray="3 3" 
+                        className="stroke-orange-200/40 dark:stroke-orange-800/40" 
+                        opacity={0.3} 
+                      />
                       <XAxis 
                         dataKey="visaType" 
                         className="text-xs"
@@ -262,7 +338,17 @@ export function VisaStatusReport() {
                         stroke="currentColor"
                       />
                       <YAxis className="text-xs" stroke="currentColor" />
-                      <Tooltip content={<CustomTooltip />} />
+                      
+                      {/* Fixed Tooltip with cursor styling */}
+                      <Tooltip 
+                        content={<CustomTooltip />}
+                        cursor={{ 
+                          fill: 'rgba(37, 21, 9, 0.03)', // Light orange with low opacity
+                          className: 'dark:fill-orange-900/20' // Dark mode cursor
+                        }}
+                        wrapperStyle={{ outline: 'none' }} // Remove default wrapper styling
+                      />
+                      
                       <Legend />
                       <Bar 
                         dataKey="leads" 
@@ -304,7 +390,10 @@ export function VisaStatusReport() {
                         dataKey="leads"
                       >
                         {visaData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          <Cell 
+                            key={`cell-${index}`} 
+                            fill={VISA_COLORS[entry.visaType] || COLORS[index % COLORS.length]} 
+                          />
                         ))}
                       </Pie>
                       <Tooltip content={<CustomTooltip />} />
@@ -313,7 +402,6 @@ export function VisaStatusReport() {
                 </TabsContent>
               </Tabs>
 
-              {/* Summary Stats with refined glassmorphism */}
               <motion.div 
                 className="grid grid-cols-2 lg:grid-cols-3 gap-4 mt-6"
                 initial={{ opacity: 0, y: 20 }}
@@ -355,6 +443,35 @@ export function VisaStatusReport() {
                     {conversionRate}%
                   </p>
                 </motion.div>
+              </motion.div>
+
+              {/* Visa Category Legend */}
+              <motion.div
+                className="mt-4 p-3 rounded-lg bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.5 }}
+              >
+                <p className="text-xs font-semibold text-muted-foreground mb-2">Visa Categories</p>
+                <div className="flex flex-wrap gap-3">
+                  {visaData.map((visa, index) => (
+                    <Badge 
+                      key={index}
+                      variant="outline"
+                      className="text-xs"
+                      style={{ 
+                        borderColor: VISA_COLORS[visa.visaType],
+                        color: VISA_COLORS[visa.visaType]
+                      }}
+                    >
+                      <div 
+                        className="w-2 h-2 rounded-full mr-1.5" 
+                        style={{ backgroundColor: VISA_COLORS[visa.visaType] }}
+                      />
+                      {visa.visaType} ({visa.leads})
+                    </Badge>
+                  ))}
+                </div>
               </motion.div>
             </>
           )}

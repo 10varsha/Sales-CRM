@@ -11,6 +11,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { differenceInDays, format } from 'date-fns';
 import type { DateRange } from 'react-day-picker';
 import { useToast } from '@/hooks/use-toast';
+import { useDataService } from '@/hooks/useDataService';
 
 const NEW_LEADS_DAYS_WINDOW = 7;
 
@@ -334,6 +335,7 @@ export function DashboardStats() {
   const [stats, setStats] = useState<StatCardData[]>([]);
   const [timeframe, setTimeframe] = useState<'day' | 'week' | 'month'>('week');
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
+  const { fetchAllLeads } = useDataService();
 
   // Format date range for display
   const formatDateRange = (range: DateRange | undefined) => {
