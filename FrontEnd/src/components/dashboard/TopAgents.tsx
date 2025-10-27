@@ -3,10 +3,10 @@ import { motion, useInView } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Trophy, DollarSign, Target, ChevronDown } from 'lucide-react';
+import { Trophy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
+import { useDateFilter } from '@/context/DateFilterContext';
 
 interface Agent {
   id: string;
@@ -18,16 +18,25 @@ interface Agent {
   rank?: number;
 }
 
+interface User {
+  userid: number | string;
+  name: string;
+  email?: string;
+  roleid?: number;
+  [key: string]: any;
+}
+
 interface Lead {
   id: number;
   firstname?: string;
   lastname?: string;
-  assignedto?: string;
+  assignedto?: string | number;
   createdby?: string | number;
   status?: string;
   expectedrevenue?: number | null;
   amountpaid?: number;
-  company?: string;
+  createdat?: string;
+  created_at?: string;
 }
 
 function SkeletonLoader() {
@@ -49,11 +58,21 @@ function SkeletonLoader() {
 export function TopAgents() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
-  const [displayCount, setDisplayCount] = useState(5);
-  const [showAll, setShowAll] = useState(false);
   const ref = useRef(null);
   const isInView = useInView(ref, { once: true });
   const { fetchWithAuth } = useAuth();
+  const { getDateRangeFilter } = useDateFilter();
+
+  // Filter leads by date from context
+  const filterLeadsByDate = (leads: Lead[]) => {
+    const range = getDateRangeFilter();
+    if (!range) return leads;
+
+    return leads.filter(lead => {
+      const leadDate = new Date(lead.createdat || lead.created_at || '');
+      return leadDate >= range.start && leadDate <= range.end;
+    });
+  };
 
   useEffect(() => {
     const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
@@ -62,6 +81,18 @@ export function TopAgents() {
     const load = async () => {
       setLoading(true);
       try {
+        // Fetch users with roleid = 4 (sales leads)
+        const usersRes = await fetchWithAuth('https://saleshub.silverspace.tech/users');
+        let salesLeads: User[] = [];
+        if (usersRes.ok) {
+          const apiUsers = await usersRes.json();
+          const allUsers = Array.isArray(apiUsers.items) ? apiUsers.items : (Array.isArray(apiUsers) ? apiUsers : []);
+          salesLeads = allUsers.filter((user: User) =>
+            Number(user.roleid) === 4 || Number(user.roleid) === 5
+          );
+        }
+
+        // Fetch all leads
         const leadsRes = await fetchWithAuth(`${API_BASE_URL}/crm-leads?take=1000`);
         if (!leadsRes.ok) throw new Error('Failed to load leads');
         const result = await leadsRes.json();
@@ -71,50 +102,49 @@ export function TopAgents() {
           : Array.isArray(result.items)
           ? result.items
           : [];
+
         if (!cancelled && Array.isArray(allLeads)) {
-          const agentMap = new Map<
-            string,
-            { deals: number; revenue: number; name: string; initials: string }
-          >();
+          // Apply date filter
+          const filteredLeads = filterLeadsByDate(allLeads);
 
-          allLeads.forEach((lead) => {
-            let agentId = String(lead.assignedto || lead.createdby || '').trim();
-            if (!agentId || agentId === 'unassigned') return;
+          // Map sales leads to their performance
+          const agentMap = new Map<string, { deals: number; revenue: number; name: string; initials: string }>();
 
-            const first = (lead.firstname || '').trim();
-            const last = (lead.lastname || '').trim();
-            const agentName =
-              [first, last].filter(Boolean).join(' ').replace(/\s+/g, ' ') ||
-              `Agent ${agentId}`;
-            const initials =
-              ((first && first[0] ? first[0] : '') +
-                (last && last[0] ? last[0] : '') ||
-                agentId.slice(0, 2)
-              ).toUpperCase();
+          salesLeads.forEach((user) => {
+            const userId = String(user.userid);
+            const userName = user.name || `User ${userId}`;
+            const nameParts = userName.split(' ');
+            const initials = nameParts.length > 1 
+              ? `${nameParts[0][0]}${nameParts[nameParts.length - 1][0]}`.toUpperCase()
+              : userName.slice(0, 2).toUpperCase();
 
-            let revenue = 0;
-            if (lead.expectedrevenue != null && !isNaN(Number(lead.expectedrevenue)))
-              revenue = Number(lead.expectedrevenue);
-            else if (lead.amountpaid != null && !isNaN(Number(lead.amountpaid)))
-              revenue = Number(lead.amountpaid);
+            // Count leads assigned to this user
+            const userLeads = filteredLeads.filter(lead => 
+              String(lead.assignedto) === userId || String(lead.createdby) === userId
+            );
 
-            const prev = agentMap.get(agentId) || {
-              deals: 0,
-              revenue: 0,
-              name: agentName,
-              initials: initials,
-            };
-            agentMap.set(agentId, {
-              deals: prev.deals + 1,
-              revenue: prev.revenue + revenue,
-              name: prev.name,
-              initials: prev.initials,
+            const deals = userLeads.length;
+            const revenue = userLeads.reduce((sum, lead) => {
+              const amount = lead.expectedrevenue != null && !isNaN(Number(lead.expectedrevenue))
+                ? Number(lead.expectedrevenue)
+                : lead.amountpaid != null && !isNaN(Number(lead.amountpaid))
+                ? Number(lead.amountpaid)
+                : 0;
+              return sum + amount;
+            }, 0);
+
+            agentMap.set(userId, {
+              deals,
+              revenue,
+              name: userName,
+              initials
             });
           });
 
+          // Convert to array and sort by deals, then revenue
           let agentsArray: Agent[] = Array.from(agentMap.entries()).map(
-            ([agentId, data], idx) => ({
-              id: agentId,
+            ([userId, data]) => ({
+              id: userId,
               name: data.name,
               initials: data.initials,
               deals: data.deals,
@@ -131,6 +161,7 @@ export function TopAgents() {
           setAgents(agentsArray);
         }
       } catch (err) {
+        console.error('Error loading agents:', err);
         setAgents([]);
       } finally {
         if (!cancelled) setTimeout(() => setLoading(false), 300);
@@ -141,7 +172,7 @@ export function TopAgents() {
     return () => {
       cancelled = true;
     };
-  }, [fetchWithAuth]);
+  }, [fetchWithAuth, getDateRangeFilter]);
 
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat('en-US', {
@@ -150,10 +181,6 @@ export function TopAgents() {
       maximumFractionDigits: 0,
     }).format(value);
 
-  const displayedAgents = showAll ? agents : agents.slice(0, displayCount);
-  const hasMore = agents.length > displayCount;
-
-  // Only top 5 have trophy icon, everyone else shows their rank as #number
   const getRankLogo = (rank: number) => {
     if (rank >= 1 && rank <= 5) {
       return (
@@ -183,10 +210,10 @@ export function TopAgents() {
               </div>
               <div>
                 <CardTitle className="text-xl font-bold bg-gradient-to-r from-emerald-600 to-teal-600 dark:from-emerald-400 dark:to-teal-400 bg-clip-text text-transparent">
-                  Top Performing Agents
+                  Top Performing Sales Leads
                 </CardTitle>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Ranked by leads • {agents.length} total agents
+                  Ranked by performance • {agents.length} sales leads
                 </p>
               </div>
             </div>
@@ -201,88 +228,85 @@ export function TopAgents() {
               <div className="w-16 h-16 mb-4 rounded-full bg-emerald-100 dark:bg-emerald-950/30 flex items-center justify-center">
                 <Trophy className="h-8 w-8 text-emerald-400 dark:text-emerald-600" />
               </div>
-              <p className="text-muted-foreground text-sm font-medium">No agent data available</p>
+              <p className="text-muted-foreground text-sm font-medium">No sales lead data available</p>
               <p className="text-xs text-muted-foreground mt-1">
-                Assign leads to agents to see rankings
+                No users with roleid = 4 found
               </p>
             </div>
           ) : (
-            <>
-              <div className="space-y-3 max-h-[570px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-emerald-300 dark:scrollbar-thumb-emerald-700">
-                {agents.map((agent, index) => {
-                  const progressPercentage = Math.min(
-                    (agent.deals / agent.target) * 100,
-                    100
-                  );
-                  return (
+            <div className="space-y-3 max-h-[650px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-emerald-300 dark:scrollbar-thumb-emerald-700">
+              {agents.map((agent, index) => {
+                const progressPercentage = Math.min(
+                  (agent.deals / agent.target) * 100,
+                  100
+                );
+                return (
+                  <motion.div
+                    key={agent.id}
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: index * 0.05, duration: 0.3 }}
+                    className={cn(
+                      'flex items-center gap-4 p-3 rounded-xl transition-all duration-300',
+                      'hover:shadow-md',
+                      agent.rank && agent.rank <= 5
+                        ? 'bg-gradient-to-r from-emerald-50/50 to-teal-50/50 dark:from-emerald-950/30 dark:to-teal-950/30 border border-emerald-200/50 dark:border-emerald-800/50'
+                        : 'bg-white/50 dark:bg-gray-900/50 border border-transparent hover:border-emerald-200 dark:hover:border-emerald-800'
+                    )}
+                  >
+                    <div className="flex-shrink-0 w-8 text-center">
+                      {getRankLogo(agent.rank ?? index + 1)}
+                    </div>
                     <motion.div
-                      key={agent.id}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: index * 0.05, duration: 0.3 }}
-                      className={cn(
-                        'flex items-center gap-4 p-3 rounded-xl transition-all duration-300',
-                        'hover:shadow-md',
-                        agent.rank && agent.rank <= 5
-                          ? 'bg-gradient-to-r from-emerald-50/50 to-teal-50/50 dark:from-emerald-950/30 dark:to-teal-950/30 border border-emerald-200/50 dark:border-emerald-800/50'
-                          : 'bg-white/50 dark:bg-gray-900/50 border border-transparent hover:border-emerald-200 dark:hover:border-emerald-800'
-                      )}
+                      whileHover={{ scale: 1.1, rotate: 5 }}
+                      transition={{ duration: 0.2 }}
                     >
-                      <div className="flex-shrink-0 w-8 text-center">
-                        {getRankLogo(agent.rank ?? index + 1)}
-                      </div>
-                      <motion.div
-                        whileHover={{ scale: 1.1, rotate: 5 }}
-                        transition={{ duration: 0.2 }}
-                      >
-                        <Avatar className="h-11 w-11 border-2 border-emerald-200 dark:border-emerald-800">
-                          <AvatarFallback className="bg-gradient-to-br from-emerald-500 to-teal-500 text-white font-bold">
-                            {agent.initials}
-                          </AvatarFallback>
-                        </Avatar>
-                      </motion.div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex justify-between items-start mb-1.5">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold truncate text-gray-900 dark:text-gray-100">
-                              {agent.name}
-                            </p>
-                          </div>
-                          <div className="text-right ml-2">
-                            <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
-                              {formatCurrency(agent.revenue)}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1 relative">
-                            <div className="h-2 w-full bg-emerald-100 dark:bg-emerald-950/30 rounded-full overflow-hidden">
-                              <motion.div
-                                className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full"
-                                initial={{ width: 0 }}
-                                animate={{ width: `${progressPercentage}%` }}
-                                transition={{
-                                  duration: 0.8,
-                                  delay: index * 0.05,
-                                  ease: 'easeOut',
-                                }}
-                              />
-                            </div>
-                          </div>
-                       <Badge
-                        variant="outline"
-                        className="text-xs font-semibold border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400"
-                      >
-                        {agent.deals}
-                      </Badge>
-
-                        </div>
-                      </div>
+                      <Avatar className="h-11 w-11 border-2 border-emerald-200 dark:border-emerald-800">
+                        <AvatarFallback className="bg-gradient-to-br from-emerald-500 to-teal-500 text-white font-bold">
+                          {agent.initials}
+                        </AvatarFallback>
+                      </Avatar>
                     </motion.div>
-                  );
-                })}
-              </div>
-            </>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between items-start mb-1.5">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold truncate text-gray-900 dark:text-gray-100">
+                            {agent.name}
+                          </p>
+                        </div>
+                        <div className="text-right ml-2">
+                          <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                            {formatCurrency(agent.revenue)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 relative">
+                          <div className="h-2 w-full bg-emerald-100 dark:bg-emerald-950/30 rounded-full overflow-hidden">
+                            <motion.div
+                              className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full"
+                              initial={{ width: 0 }}
+                              animate={{ width: `${progressPercentage}%` }}
+                              transition={{
+                                duration: 0.8,
+                                delay: index * 0.05,
+                                ease: 'easeOut',
+                              }}
+                            />
+                          </div>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className="text-xs font-semibold border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400"
+                        >
+                          {agent.deals}
+                        </Badge>
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
           )}
         </CardContent>
       </Card>

@@ -1,12 +1,12 @@
 import { motion, Transition } from 'framer-motion';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { DashboardStats } from '@/components/dashboard/DashboardStats';
-import { SalesPipeline } from '@/components/dashboard/SalesPipeline';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { TopAgents } from '@/components/dashboard/TopAgents';
 import { LeadsTrendChart } from '@/components/dashboard/LeadsTrendChart';
 import { VisaStatusReport } from '@/components/dashboard/VisaStatusReport';
 import { RevenueAttribution } from '@/components/dashboard/RevenueAttribution';
+import { DateFilterProvider } from '@/context/DateFilterContext';
 
 const Index = () => {
   const containerVariants = {
@@ -35,7 +35,8 @@ const Index = () => {
 
   return (
     <DashboardLayout>
-      <motion.div 
+      <DateFilterProvider>
+        <motion.div 
         className="space-y-6"
         variants={containerVariants}
         initial="hidden"
@@ -79,47 +80,52 @@ const Index = () => {
           />
         </motion.div>
 
-        {/* Bento Grid Layout */}
+        {/* Top Stats - Full Width */}
+        <motion.div variants={itemVariants}>
+          <DashboardStats />
+        </motion.div>
+
+        {/* Main Content Grid - Match Heights */}
         <motion.div 
-          className="grid grid-cols-1 md:grid-cols-12 gap-6 auto-rows-min"
+          className="grid grid-cols-1 lg:grid-cols-3 gap-6"
           variants={containerVariants}
         >
-          {/* Top Stats - Full Width */}
-          <motion.div variants={itemVariants} className="md:col-span-12">
-            <DashboardStats />
-          </motion.div>
-
-          {/* Visa Status Report - Large Left Card */}
-          <motion.div variants={itemVariants} className="md:col-span-8 md:row-span-2">
+          {/* Visa Status Report - 2 columns */}
+          <motion.div variants={itemVariants} className="lg:col-span-2">
             <VisaStatusReport />
           </motion.div>
 
-          {/* Top Agents - Right Column */}
-          <motion.div variants={itemVariants} className="md:col-span-4">
-            <TopAgents />
+          {/* Top Agents - Increased Height - 1 column */}
+          <motion.div variants={itemVariants} className="lg:col-span-1">
+            <div className="h-full min-h-[00px]">
+              <TopAgents />
+            </div>
           </motion.div>
+        </motion.div>
 
-          {/* Activity Feed - Right Column */}
-          <motion.div variants={itemVariants} className="md:col-span-4">
-            <ActivityFeed />
-          </motion.div>
-
-          {/* Revenue Attribution - Wide Card */}
-          <motion.div variants={itemVariants} className="md:col-span-8">
+        {/* Second Row Grid */}
+        <motion.div 
+          className="grid grid-cols-1 lg:grid-cols-3 gap-6"
+          variants={containerVariants}
+        >
+          {/* Revenue Attribution - 2 columns */}
+          <motion.div variants={itemVariants} className="lg:col-span-2">
             <RevenueAttribution />
           </motion.div>
 
-          {/* Sales Pipeline - Medium Card */}
-          <motion.div variants={itemVariants} className="md:col-span-4">
-            <SalesPipeline />
-          </motion.div>
-
-          {/* Leads Trend - Wide Bottom */}
-          <motion.div variants={itemVariants} className="md:col-span-12">
-            <LeadsTrendChart />
+          {/* Activity Feed - 1 column */}
+          <motion.div variants={itemVariants} className="lg:col-span-1">
+            <ActivityFeed />
           </motion.div>
         </motion.div>
+
+        {/* Leads Trend Chart - Full Width */}
+        <motion.div variants={itemVariants}>
+          <LeadsTrendChart />
+        </motion.div>
       </motion.div>
+      </DateFilterProvider>
+      
     </DashboardLayout>
   );
 };

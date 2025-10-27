@@ -6,16 +6,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { Download, Filter, Search, X } from 'lucide-react';
 
-// --- User and Lead Types ---
 interface User {
   userid: number | string;
   name: string;
   email?: string;
+  roleid?: number;
+  managerid?: number | string;
   [key: string]: any;
 }
 interface Lead {
@@ -29,7 +30,9 @@ interface Lead {
   createdat?: string;
 }
 
-// --- Recharts colors and mapping ---
+const VISA_STATUSES = [
+  'F-1 Visa', 'F-1 OPT', 'STEM OPT', 'H-1B Visa', 'Green Card', 'Other', 'Unknown'
+];
 const VISA_COLORS: Record<string, string> = {
   'F-1 Visa': '#3B82F6',
   'F-1 OPT': '#10B981',
@@ -39,7 +42,6 @@ const VISA_COLORS: Record<string, string> = {
   'Other': '#6B7280',
   'Unknown': '#9CA3AF'
 };
-const COLORS = Object.values(VISA_COLORS);
 const VISA_STATUS_MAP: Record<number, string> = {
   1: 'F-1 Visa',
   2: 'F-1 OPT',
@@ -49,10 +51,10 @@ const VISA_STATUS_MAP: Record<number, string> = {
   6: 'Other'
 };
 
-const getVisaTypeName = (visaStatusId: number): string =>
-  VISA_STATUS_MAP[visaStatusId] || 'Unknown';
+const getVisaTypeName = (visaStatusId?: number): string =>
+  visaStatusId ? (VISA_STATUS_MAP[visaStatusId] || 'Unknown') : 'Unknown';
 
-const normalizeVisaType = (visaType: string): string => {
+const normalizeVisaType = (visaType?: string): string => {
   if (!visaType) return 'Unknown';
   const normalized = visaType.toLowerCase().trim();
   if (normalized.includes('f-1') || normalized.includes('f1')) {
@@ -69,6 +71,7 @@ const normalizeVisaType = (visaType: string): string => {
       normalized.includes('e-2') || normalized.includes('e2') || normalized.includes('tn') || normalized.includes('j-1') || normalized.includes('j1')) return 'Other';
   return 'Unknown';
 };
+
 const TIME_FILTERS = [
   { value: 'all', label: 'All Time' },
   { value: 'day', label: 'Today' },
@@ -96,6 +99,7 @@ function filterLeadsByTime(leads: Lead[], filter: string): Lead[] {
     return true;
   });
 }
+
 function SkeletonLoader() {
   return (
     <div className="space-y-4 animate-pulse">
@@ -108,6 +112,7 @@ function SkeletonLoader() {
     </div>
   );
 }
+
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
     return (
@@ -131,28 +136,24 @@ export function VisaStatusReport() {
   const { toast } = useToast();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [selectedUserId, setSelectedUserId] = useState<string>('all');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [loading, setLoading] = useState(false);
   const [timeFilter, setTimeFilter] = useState('all');
+  const [loading, setLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const ref = useRef(null);
   const isInView = useInView(ref, { once: true });
 
   useEffect(() => {
     let cancelled = false;
     let interval: NodeJS.Timeout;
-
     const load = async () => {
       setLoading(true);
       try {
-        // USERS: fetch all from correct API w/ structure
         const usersRes = await fetchWithAuth("https://saleshub.silverspace.tech/users");
         let allUsers: User[] = [];
         if (usersRes.ok) {
           const apiUsers = await usersRes.json();
-          allUsers = Array.isArray(apiUsers) ? apiUsers : (apiUsers.items ?? []);
+          allUsers = Array.isArray(apiUsers.items) ? apiUsers.items : (Array.isArray(apiUsers) ? apiUsers : []);
         }
-        // LEADS: as before
         const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
         const leadsRes = await fetchWithAuth(`${API_BASE_URL}/crm-leads?take=1000`);
         let allLeads: Lead[] = [];
@@ -176,63 +177,48 @@ export function VisaStatusReport() {
         if (!cancelled) setTimeout(() => setLoading(false), 300);
       }
     };
-
     load();
     interval = setInterval(load, 30000);
     return () => { cancelled = true; clearInterval(interval); };
   }, [fetchWithAuth, toast]);
 
-  const filteredUsers = useMemo(() => {
-    if (!searchQuery) return users;
-    const query = searchQuery.toLowerCase();
-    return users.filter(user => {
-      const name = (user.name ?? '').toLowerCase();
-      const email = (user.email ?? '').toLowerCase();
-      return name.includes(query) || email.includes(query);
-    });
-  }, [users, searchQuery]);
+  // Leaders only
+  const leaders = useMemo(() =>
+    users.filter(u => u.roleid === 4), [users]
+  );
+  const filteredLeaders = useMemo(() => {
+    if (!searchQuery) return leaders;
+    const q = searchQuery.toLowerCase();
+    return leaders.filter(user => (user.name ?? '').toLowerCase().includes(q) || (user.email ?? '').toLowerCase().includes(q));
+  }, [leaders, searchQuery]);
 
-  const selectedUserName = useMemo(() => {
-    if (selectedUserId === 'all') return 'All Users';
-    const user = users.find(u => String(u.userid) === selectedUserId);
-    return user ? user.name : 'Unknown';
-  }, [selectedUserId, users]);
-
-  // Filters for user and time:
-  const filteredLeads = useMemo(() => {
-    let result = leads;
-    if (selectedUserId !== 'all') {
-      result = result.filter(lead => String(lead.assignedto ?? lead.createdby) === selectedUserId);
-    }
-    result = filterLeadsByTime(result, timeFilter);
-    return result;
-  }, [leads, selectedUserId, timeFilter]);
-
-  const visaData = useMemo(() => {
-    const visaMap = new Map<string, { leads: number; converted: number }>();
-    filteredLeads.forEach(lead => {
-      const visaTypeName = getVisaTypeName(lead.visastatusid ?? 0);
-      const visaType = normalizeVisaType(visaTypeName);
-      const status = (lead.status ?? '').toLowerCase();
-      const isConverted = status.includes('closed won') || status.includes('closed') || status.includes('won');
-      const current = visaMap.get(visaType) || { leads: 0, converted: 0 };
-      visaMap.set(visaType, {
-        leads: current.leads + 1,
-        converted: current.converted + (isConverted ? 1 : 0),
+  // Build visa summary for each leader's team
+  const chartData = useMemo(() => {
+    return leaders.map(leader => {
+      // Members directly under this leader
+      const teamMembers = users.filter(u => String(u.managerid) === String(leader.userid));
+      // All leads for these members (assignedto/memberIds)
+      const memberIds = new Set(teamMembers.map(m => String(m.userid)));
+      const memberLeads = filterLeadsByTime(
+        leads.filter(l => l.assignedto !== undefined && memberIds.has(String(l.assignedto))),
+        timeFilter
+      );
+      const visaCounts: Record<string, number> = {};
+      for (const visaStatus of VISA_STATUSES) visaCounts[visaStatus] = 0;
+      memberLeads.forEach(lead => {
+        const vType = normalizeVisaType(getVisaTypeName(lead.visastatusid));
+        visaCounts[vType] = (visaCounts[vType] ?? 0) + 1;
       });
+      return {
+        leader: leader.name,
+        ...visaCounts
+      };
     });
-    const visaOrder = ['F-1 Visa', 'F-1 OPT', 'STEM OPT', 'H-1B Visa', 'Green Card', 'Other', 'Unknown'];
-    return visaOrder
-      .map(visaType => {
-        const stats = visaMap.get(visaType) || { leads: 0, converted: 0 };
-        return { visaType, ...stats };
-      })
-      .filter(item => item.leads > 0);
-  }, [filteredLeads]);
+  }, [leaders, users, leads, timeFilter]);
 
-  const totalLeads = visaData.reduce((sum, v) => sum + v.leads, 0);
-  const totalConverted = visaData.reduce((sum, v) => sum + v.converted, 0);
-  const conversionRate = totalLeads > 0 ? ((totalConverted / totalLeads) * 100).toFixed(1) : '0.0';
+  const totalLeads = chartData.reduce((sum, m) =>
+    VISA_STATUSES.reduce((s, v) => s + (m[v] ?? 0), sum)
+  , 0);
 
   return (
     <motion.div
@@ -249,12 +235,7 @@ export function VisaStatusReport() {
                 Visa Status Report
               </CardTitle>
               <p className="text-sm text-muted-foreground">
-                Track visa applications • {totalLeads} leads
-                {selectedUserId !== 'all' && (
-                  <span className="ml-2 text-orange-600 dark:text-orange-400 font-semibold">
-                    • {selectedUserName}
-                  </span>
-                )}
+                Team-wise Visa Contributions
               </p>
             </div>
             <div className="flex items-center gap-2 shrink-0 flex-wrap">
@@ -282,18 +263,17 @@ export function VisaStatusReport() {
                   ))}
                 </SelectContent>
               </Select>
-              {/* User Filter */}
-              <Select value={selectedUserId} onValueChange={setSelectedUserId}>
+              <Select value="">
                 <SelectTrigger className="w-[225px] bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm border-orange-300/50 dark:border-orange-800/50 font-semibold shadow-md">
                   <Filter className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder="By User" />
+                  <SelectValue placeholder="All Leaders" />
                 </SelectTrigger>
                 <SelectContent>
                   <div className="p-2">
                     <div className="relative">
                       <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                       <Input
-                        placeholder="Search users..."
+                        placeholder="Search leaders..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         className="pl-8 h-9"
@@ -301,132 +281,84 @@ export function VisaStatusReport() {
                       />
                     </div>
                   </div>
-                  <SelectItem value="all">
-                    <div className="flex items-center justify-between w-full">
-                      <span className="font-semibold">All Users</span>
-                      <Badge variant="secondary" className="ml-2">{leads.length}</Badge>
-                    </div>
-                  </SelectItem>
-                  {filteredUsers.length > 0 ? (
-                    filteredUsers.map((user) => {
-                      const userLeads = leads.filter(
-                        l => String(l.assignedto ?? l.createdby) === String(user.userid)
-                      ).length;
+                  {filteredLeaders.length > 0 ? (
+                    filteredLeaders.map((user) => {
+                      // For reference: Could use to auto-highlight a leader in future.
+                      const memberCount = users.filter(u => String(u.managerid) === String(user.userid)).length;
                       return (
                         <SelectItem key={user.userid} value={String(user.userid)}>
                           <div className="flex items-center justify-between w-full">
                             <span>{user.name}</span>
-                            <Badge variant="outline" className="ml-2">{userLeads}</Badge>
+                            <Badge variant="outline" className="ml-2">{memberCount}</Badge>
                           </div>
                         </SelectItem>
                       );
                     })
                   ) : (
                     <div className="p-2 text-sm text-muted-foreground text-center">
-                      {searchQuery ? 'No matching users' : 'No users found'}
+                      {searchQuery ? 'No matching leaders' : 'No leaders found'}
                     </div>
                   )}
                 </SelectContent>
               </Select>
-              {selectedUserId !== 'all' && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setSelectedUserId('all')}
-                  className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              )}
             </div>
           </div>
         </CardHeader>
         <CardContent className="flex-1 relative z-10">
           {loading ? (
             <SkeletonLoader />
-          ) : visaData.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-64 text-center">
-              <div className="w-16 h-16 mb-4 rounded-full bg-orange-100 dark:bg-orange-950/30 flex items-center justify-center">
-                <Filter className="h-8 w-8 text-orange-400 dark:text-orange-600" />
-              </div>
-              <p className="text-muted-foreground text-lg font-medium">No visa data available</p>
-              <p className="text-sm text-muted-foreground mt-1">
-                {selectedUserId !== 'all'
-                  ? 'This user has no assigned leads'
-                  : 'No leads found'}
-              </p>
-            </div>
           ) : (
             <>
               <Tabs defaultValue="bar" className="w-full">
-                <TabsList className="grid w-full max-w-md grid-cols-2 mb-4 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm border border-orange-200/30 dark:border-orange-800/30">
-                  <TabsTrigger value="bar" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-orange-500 data-[state=active]:to-pink-500 data-[state=active]:text-white font-semibold transition-all duration-300">
-                    Bar Chart
-                  </TabsTrigger>
-                  <TabsTrigger value="pie" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-orange-500 data-[state=active]:to-pink-500 data-[state=active]:text-white font-semibold transition-all duration-300">
-                    Distribution
+                <TabsList className="grid w-full max-w-md grid-cols-1 mb-4 bg-gradient-to-r from-orange-500 to-pink-500 text-white font-semibold text-lg rounded-lg">
+                  <TabsTrigger value="bar" className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-orange-500 data-[state=active]:to-pink-500 data-[state=active]:text-white">
+                    Member-wise Visa Status
                   </TabsTrigger>
                 </TabsList>
-                <TabsContent value="bar" className="h-[320px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={visaData} style={{ backgroundColor: 'transparent' }}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-orange-200/40 dark:stroke-orange-800/40" opacity={0.3} />
-                      <XAxis dataKey="visaType" className="text-xs" angle={-45} textAnchor="end" height={80} stroke="currentColor" />
-                      <YAxis className="text-xs" stroke="currentColor" />
-                      <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(37, 21, 9, 0.03)' }} wrapperStyle={{ outline: 'none' }} />
-                      <Legend />
-                      <Bar dataKey="leads" fill="url(#colorLeads)" name="Total Leads" radius={[8, 8, 0, 0]} />
-                      <Bar dataKey="converted" fill="url(#colorConverted)" name="Converted" radius={[8, 8, 0, 0]} />
-                      <defs>
-                        <linearGradient id="colorLeads" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#FB923C" stopOpacity={0.9}/>
-                          <stop offset="95%" stopColor="#F97316" stopOpacity={0.7}/>
-                        </linearGradient>
-                        <linearGradient id="colorConverted" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#4ADE80" stopOpacity={0.9}/>
-                          <stop offset="95%" stopColor="#22C55E" stopOpacity={0.7}/>
-                        </linearGradient>
-                      </defs>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </TabsContent>
-                <TabsContent value="pie" className="h-[320px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie data={visaData} cx="50%" cy="50%" labelLine={false} label={({ visaType, percent }) => `${visaType}: ${(percent * 100).toFixed(0)}%`} outerRadius={100} fill="#8884d8" dataKey="leads">
-                        {visaData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={VISA_COLORS[entry.visaType] || COLORS[index % COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip content={<CustomTooltip />} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </TabsContent>
+                <TabsContent value="bar" className="h-[400px]">
+  <ResponsiveContainer width="100%" height="100%">
+    <BarChart data={chartData} style={{ backgroundColor: 'transparent' }}
+      margin={{ top: 5, right: 46, left: 18, bottom: 70 }}
+    >
+      <defs>
+        {VISA_STATUSES.map(status => (
+          <linearGradient id={`vert-grad-${status}`} x1="0" y1="0" x2="0" y2="1" key={status}>
+            <stop offset="0%" stopColor={VISA_COLORS[status]} stopOpacity={0.84}/>
+            <stop offset="85%" stopColor={VISA_COLORS[status]} stopOpacity={1}/>
+          </linearGradient>
+        ))}
+      </defs>
+      <CartesianGrid strokeDasharray="3 3" opacity={0.14} />
+      <XAxis dataKey="leader" className="text-xs" stroke="currentColor" interval={0} angle={-18} textAnchor="end" height={64} />
+      <YAxis className="text-xs" stroke="currentColor" allowDecimals={false} />
+      <Tooltip content={<CustomTooltip />} cursor={{ fill: "none" }} wrapperStyle={{ outline: 'none' }} />
+      <Legend verticalAlign="bottom" wrapperStyle={{ marginTop: 34 }} />
+      {VISA_STATUSES.map((status) => (
+        <Bar
+          key={status}
+          dataKey={status}
+          stackId="a"
+          name={status}
+          fill={`url(#vert-grad-${status})`}
+          barSize={44}
+          radius={[18, 18, 0, 0]}
+          style={{
+            filter: 'drop-shadow(0 3px 19px rgba(0,0,0,0.10))'
+          }}
+          isAnimationActive={true}
+        />
+      ))}
+    </BarChart>
+  </ResponsiveContainer>
+</TabsContent>
+
+
               </Tabs>
               <motion.div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mt-6" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
                 <motion.div className="p-4 rounded-xl backdrop-blur-sm bg-white/70 dark:bg-gray-900/70 border border-orange-200/50 dark:border-orange-800/50 shadow-md hover:shadow-xl transition-all duration-300" whileHover={{ scale: 1.03, y: -2 }}>
                   <p className="text-xs font-semibold text-orange-600 dark:text-orange-400 uppercase tracking-wider mb-1">Total Leads</p>
                   <p className="text-3xl font-bold bg-gradient-to-r from-orange-600 to-pink-600 dark:from-orange-400 dark:to-pink-400 bg-clip-text text-transparent">{totalLeads}</p>
                 </motion.div>
-                <motion.div className="p-4 rounded-xl backdrop-blur-sm bg-white/70 dark:bg-gray-900/70 border border-teal-200/50 dark:border-teal-800/50 shadow-md hover:shadow-xl transition-all duration-300" whileHover={{ scale: 1.03, y: -2 }}>
-                  <p className="text-xs font-semibold text-teal-600 dark:text-teal-400 uppercase tracking-wider mb-1">Converted</p>
-                  <p className="text-3xl font-bold bg-gradient-to-r from-teal-600 to-green-600 dark:from-teal-400 dark:to-green-400 bg-clip-text text-transparent">{totalConverted}</p>
-                </motion.div>
-                <motion.div className="p-4 rounded-xl backdrop-blur-sm bg-white/70 dark:bg-gray-900/70 border border-purple-200/50 dark:border-purple-800/50 shadow-md hover:shadow-xl transition-all duration-300 col-span-2 lg:col-span-1" whileHover={{ scale: 1.03, y: -2 }}>
-                  <p className="text-xs font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wider mb-1">Conversion Rate</p>
-                  <p className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 dark:from-purple-400 dark:to-pink-400 bg-clip-text text-transparent">{conversionRate}%</p>
-                </motion.div>
-              </motion.div>
-              <motion.div className="mt-4 p-3 rounded-lg bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }}>
-                <p className="text-xs font-semibold text-muted-foreground mb-2">Visa Categories</p>
-                <div className="flex flex-wrap gap-3">
-                  {visaData.map((visa, index) => (
-                    <Badge key={index} variant="outline" className="text-xs" style={{ borderColor: VISA_COLORS[visa.visaType], color: VISA_COLORS[visa.visaType] }}>
-                      <div className="w-2 h-2 rounded-full mr-1.5" style={{ backgroundColor: VISA_COLORS[visa.visaType] }} />
-                      {visa.visaType} ({visa.leads})
-                    </Badge>
-                  ))}
-                </div>
               </motion.div>
             </>
           )}

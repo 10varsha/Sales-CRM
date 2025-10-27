@@ -14,7 +14,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import { differenceInDays, format } from 'date-fns';
-import type { DateRange } from 'react-day-picker';
 import { useToast } from '@/hooks/use-toast';
 import { 
   startOfWeek, 
@@ -22,17 +21,10 @@ import {
   startOfMonth,
   endOfMonth,
   eachWeekOfInterval,
-  getYear,
-  getMonth,
-  addDays,
-  subMonths,
-  isSameMonth,
-  getWeek
 } from 'date-fns';
+import { useDateFilter } from '@/context/DateFilterContext';
 
 const NEW_LEADS_DAYS_WINDOW = 7;
-
-type TimeframeMode = 'day' | 'week' | 'month' | 'custom';
 
 interface StatCardData {
   title: string;
@@ -52,7 +44,7 @@ function getMonthWeeks(year: number, month: number) {
   
   const weeks = eachWeekOfInterval(
     { start, end },
-    { weekStartsOn: 0 } // Sunday
+    { weekStartsOn: 0 }
   );
   
   return weeks.map((weekStart, index) => {
@@ -68,7 +60,6 @@ function getMonthWeeks(year: number, month: number) {
   });
 }
 
-// Years array (last 5 years + current + next year)
 const YEARS = Array.from({ length: 7 }, (_, i) => new Date().getFullYear() - 2 + i);
 
 const MONTHS = [
@@ -86,7 +77,6 @@ const MONTHS = [
   { value: 11, label: 'December' },
 ];
 
-// Status card configuration with icons
 const STATUS_CONFIGS = {
   pipeline: { icon: GitPullRequest, color: '#6366F1', label: 'Pipeline' },
   'quality check': { icon: CheckCircle, color: '#8B5CF6', label: 'Quality Check' },
@@ -95,10 +85,6 @@ const STATUS_CONFIGS = {
   'not interested': { icon: XCircle, color: '#EF4444', label: 'Not Interested' },
 };
 
-// [Keep all the helper components: AnimatedCounter, AnimatedCurrency, SkeletonCard, Sparkline, StatCard - UNCHANGED]
-// ... (I'm keeping these the same as in your original code)
-
-// Animated Counter Component
 function AnimatedCounter({ value, duration = 2 }: { value: number; duration?: number }) {
   const [count, setCount] = useState(0);
   const ref = useRef<HTMLSpanElement>(null);
@@ -326,18 +312,28 @@ export function DashboardStats() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<StatCardData[]>([]);
-  const [timeframeMode, setTimeframeMode] = useState<TimeframeMode>('month');
-  const [dateRange, setDateRange] = useState<DateRange | undefined>();
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   
-  // For weekly selection
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
-  const [selectedWeek, setSelectedWeek] = useState<number | undefined>();
-  
-  // For monthly selection
-  const [monthYear, setMonthYear] = useState(new Date().getFullYear());
-  const [month, setMonth] = useState(new Date().getMonth());
+  // Use context instead of local state
+  const {
+    timeframeMode,
+    setTimeframeMode,
+    dateRange,
+    setDateRange,
+    selectedDate,
+    setSelectedDate,
+    selectedYear,
+    setSelectedYear,
+    selectedMonth,
+    setSelectedMonth,
+    selectedWeek,
+    setSelectedWeek,
+    monthYear,
+    setMonthYear,
+    month,
+    setMonth,
+    getDateRangeFilter,
+    clearFilters
+  } = useDateFilter();
 
   const weeks = useMemo(() => getMonthWeeks(selectedYear, selectedMonth), [selectedYear, selectedMonth]);
 
@@ -359,11 +355,15 @@ export function DashboardStats() {
     return timeframeMode.charAt(0).toUpperCase() + timeframeMode.slice(1);
   };
 
-  const clearFilters = () => {
-    setDateRange(undefined);
-    setSelectedDate(undefined);
-    setSelectedWeek(undefined);
-    setTimeframeMode('month');
+  // Filter leads based on date range
+  const filterLeadsByDate = (leads: any[]) => {
+    const range = getDateRangeFilter();
+    if (!range) return leads;
+
+    return leads.filter(lead => {
+      const leadDate = new Date(lead.createdat || lead.created_at);
+      return leadDate >= range.start && leadDate <= range.end;
+    });
   };
 
   useEffect(() => {
@@ -395,35 +395,37 @@ export function DashboardStats() {
         }
 
         if (!cancelled) {
-          const totalLeads = allLeads.length;
-          const newLeads = allLeads.filter(l => {
+          // Apply date filter
+          const filteredLeads = filterLeadsByDate(allLeads);
+
+          const totalLeads = filteredLeads.length;
+          const newLeads = filteredLeads.filter(l => {
             const created = new Date(l.createdat || l.created_at);
             const daysAgo = differenceInDays(new Date(), created);
             return daysAgo <= NEW_LEADS_DAYS_WINDOW;
           }).length;
 
-          const closedDeals = allLeads.filter(l => 
+          const closedDeals = filteredLeads.filter(l => 
             l.status?.toLowerCase().includes('closed') || l.stage?.toLowerCase().includes('closed')
           ).length;
 
-          const totalRevenue = allLeads.reduce((sum, l) => {
+          const totalRevenue = filteredLeads.reduce((sum, l) => {
             const amount = parseFloat(l.expectedrevenue || l.amountpaid || l.signedamount || l.amount || '0');
             return sum + amount;
           }, 0);
 
           // Count leads by status
           const statusCounts = {
-            pipeline: allLeads.filter(l => l.status?.toLowerCase() === 'pipeline').length,
-            qualityCheck: allLeads.filter(l => l.status?.toLowerCase() === 'quality check').length,
-            infoPending: allLeads.filter(l => l.status?.toLowerCase() === 'info pending').length,
-            followUp: allLeads.filter(l => l.status?.toLowerCase().includes('follow')).length,
-            notInterested: allLeads.filter(l => l.status?.toLowerCase().includes('not interested')).length,
+            pipeline: filteredLeads.filter(l => l.status?.toLowerCase() === 'pipeline').length,
+            qualityCheck: filteredLeads.filter(l => l.status?.toLowerCase() === 'quality check').length,
+            infoPending: filteredLeads.filter(l => l.status?.toLowerCase() === 'info pending').length,
+            followUp: filteredLeads.filter(l => l.status?.toLowerCase().includes('follow')).length,
+            notInterested: filteredLeads.filter(l => l.status?.toLowerCase().includes('not interested')).length,
           };
 
           const generateTrend = () => Array.from({ length: 7 }, () => Math.random() * 100 + 50);
 
           const statsData: StatCardData[] = [
-            // First Row - Main Metrics
             {
               title: 'Total Leads',
               value: totalLeads,
@@ -464,7 +466,6 @@ export function DashboardStats() {
               bgColor: '#8b5cf6',
               trend: generateTrend()
             },
-            // Second Row - Status Metrics
             {
               title: 'Pipeline',
               value: statusCounts.pipeline,
@@ -540,14 +541,12 @@ export function DashboardStats() {
 
   return (
     <div className="space-y-4">
-      {/* Controls */}
       <motion.div 
         className="space-y-3"
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
       >
-        {/* Header */}
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
             <h2 className="text-2xl font-bold tracking-tight">Key Metrics</h2>
@@ -559,7 +558,7 @@ export function DashboardStats() {
             <ToggleGroup 
               type="single" 
               value={timeframeMode} 
-              onValueChange={(v) => v && setTimeframeMode(v as TimeframeMode)}
+              onValueChange={(v) => v && setTimeframeMode(v as any)}
               className="border rounded-lg bg-white dark:bg-gray-900"
             >
               <ToggleGroupItem 
@@ -605,7 +604,6 @@ export function DashboardStats() {
           </div>
         </div>
 
-        {/* Date Selection Row */}
         {timeframeMode === 'week' && (
           <motion.div 
             className="flex flex-wrap items-center gap-2"
@@ -702,7 +700,7 @@ export function DashboardStats() {
                   mode="range"
                   selected={dateRange}
                   onSelect={setDateRange}
-                  numberOfMonths={timeframeMode === 'custom' ? 2 : 1}
+                  numberOfMonths={2}
                 />
               )}
             </PopoverContent>
@@ -710,7 +708,6 @@ export function DashboardStats() {
         )}
       </motion.div>
 
-      {/* Stats Cards - 2 Rows */}
       {loading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           {[...Array(9)].map((_, i) => (
