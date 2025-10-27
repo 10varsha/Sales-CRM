@@ -208,7 +208,7 @@ export function TopAgents() {
             </div>
           ) : (
             <>
-              <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-emerald-300 dark:scrollbar-thumb-emerald-700">
+              <div className="space-y-3 max-h-[570px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-emerald-300 dark:scrollbar-thumb-emerald-700">
                 {agents.map((agent, index) => {
                   const progressPercentage = Math.min(
                     (agent.deals / agent.target) * 100,
@@ -269,12 +269,13 @@ export function TopAgents() {
                               />
                             </div>
                           </div>
-                          <Badge
-                            variant="outline"
-                            className="text-xs font-semibold border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400"
-                          >
-                            {agent.deals}/{agent.target}
-                          </Badge>
+                       <Badge
+                        variant="outline"
+                        className="text-xs font-semibold border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400"
+                      >
+                        {agent.deals}
+                      </Badge>
+
                         </div>
                       </div>
                     </motion.div>

@@ -105,7 +105,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         ? (input as Request)
         : undefined;
     const method = (init.method ?? req?.method ?? "GET").toString().toUpperCase();
-    const urlStr = typeof input === "string" ? input : req?.url || "";
+
+    // Resolve string inputs against configured API base and sanitize any
+    // accidental 'undefined/...' interpolations that happen when callers use
+    // `${API_BASE_URL}` while the env var is missing.
+    const resolvedInput: RequestInfo = (() => {
+      if (typeof input === "string") {
+        // If someone passed a string that starts with 'undefined/', turn it into a proper relative path
+        const sanitized = input.replace(/^undefined\/*/, "/");
+        return buildUrl(sanitized);
+      }
+      return input;
+    })();
+
+    const urlStr = typeof resolvedInput === "string" ? resolvedInput : req?.url || "";
     const url = (() => {
       try {
         return new URL(urlStr);
@@ -116,7 +129,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const label = `[API] ${method} ${url?.pathname || urlStr}`;
     const start = performance.now();
 
-    const response = await fetch(input, { ...init, headers });
+    const response = await fetch(resolvedInput, { ...init, headers });
     const firstDuration = performance.now() - start;
     if (traceEnabled) {
       console.info(`${label} -> ${response.status} in ${firstDuration.toFixed(0)}ms`);
