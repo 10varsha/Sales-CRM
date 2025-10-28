@@ -16,16 +16,16 @@ interface Agent {
   revenue: number;
   target: number;
   rank?: number;
+  salesHead?: string; // New field: their sales head's name
 }
-
 interface User {
   userid: number | string;
   name: string;
   email?: string;
   roleid?: number;
+  managerid?: number | string;
   [key: string]: any;
 }
-
 interface Lead {
   id: number;
   firstname?: string;
@@ -67,7 +67,6 @@ export function TopAgents() {
   const filterLeadsByDate = (leads: Lead[]) => {
     const range = getDateRangeFilter();
     if (!range) return leads;
-
     return leads.filter(lead => {
       const leadDate = new Date(lead.createdat || lead.created_at || '');
       return leadDate >= range.start && leadDate <= range.end;
@@ -77,26 +76,27 @@ export function TopAgents() {
   useEffect(() => {
     const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
     let cancelled = false;
-
     const load = async () => {
       setLoading(true);
       try {
-        // Fetch users with roleid = 4 (sales leads)
+        // Fetch users (heads + leads)
         const usersRes = await fetchWithAuth('https://saleshub.silverspace.tech/users');
-        let salesLeads: User[] = [];
+        let allUsers: User[] = [], salesLeads: User[] = [];
         if (usersRes.ok) {
           const apiUsers = await usersRes.json();
-          const allUsers = Array.isArray(apiUsers.items) ? apiUsers.items : (Array.isArray(apiUsers) ? apiUsers : []);
+          allUsers = Array.isArray(apiUsers.items) ? apiUsers.items : (Array.isArray(apiUsers) ? apiUsers : []);
           salesLeads = allUsers.filter((user: User) =>
             Number(user.roleid) === 4 || Number(user.roleid) === 5
           );
         }
+        // For manager lookup
+        const userIdMap = new Map<string, User>();
+        allUsers.forEach(user => userIdMap.set(String(user.userid), user));
 
         // Fetch all leads
         const leadsRes = await fetchWithAuth(`${API_BASE_URL}/crm-leads?take=1000`);
         if (!leadsRes.ok) throw new Error('Failed to load leads');
         const result = await leadsRes.json();
-
         const allLeads: Lead[] = Array.isArray(result)
           ? result
           : Array.isArray(result.items)
@@ -104,25 +104,35 @@ export function TopAgents() {
           : [];
 
         if (!cancelled && Array.isArray(allLeads)) {
-          // Apply date filter
           const filteredLeads = filterLeadsByDate(allLeads);
-
-          // Map sales leads to their performance
-          const agentMap = new Map<string, { deals: number; revenue: number; name: string; initials: string }>();
-
+          const agentMap = new Map<string, {
+            deals: number;
+            revenue: number;
+            name: string;
+            initials: string;
+            salesHead?: string;
+          }>();
           salesLeads.forEach((user) => {
             const userId = String(user.userid);
             const userName = user.name || `User ${userId}`;
             const nameParts = userName.split(' ');
-            const initials = nameParts.length > 1 
+            const initials = nameParts.length > 1
               ? `${nameParts[0][0]}${nameParts[nameParts.length - 1][0]}`.toUpperCase()
               : userName.slice(0, 2).toUpperCase();
 
-            // Count leads assigned to this user
-            const userLeads = filteredLeads.filter(lead => 
+            // Find sales head: if you're a team lead, head is your manager (roleid 4); if you are a head, show yourself
+            let salesHead = '';
+            if (Number(user.roleid) === 5 && user.managerid) {
+              const mgr = userIdMap.get(String(user.managerid));
+              if (mgr && Number(mgr.roleid) === 4) salesHead = mgr.name;
+            } else if (Number(user.roleid) === 4) {
+              salesHead = user.name;
+            }
+
+            // All deals assigned to or created by this user
+            const userLeads = filteredLeads.filter(lead =>
               String(lead.assignedto) === userId || String(lead.createdby) === userId
             );
-
             const deals = userLeads.length;
             const revenue = userLeads.reduce((sum, lead) => {
               const amount = lead.expectedrevenue != null && !isNaN(Number(lead.expectedrevenue))
@@ -137,11 +147,12 @@ export function TopAgents() {
               deals,
               revenue,
               name: userName,
-              initials
+              initials,
+              salesHead
             });
           });
 
-          // Convert to array and sort by deals, then revenue
+          // Convert to sorted/ranked array
           let agentsArray: Agent[] = Array.from(agentMap.entries()).map(
             ([userId, data]) => ({
               id: userId,
@@ -150,18 +161,16 @@ export function TopAgents() {
               deals: data.deals,
               revenue: data.revenue,
               target: 10,
+              salesHead: data.salesHead,
               rank: 0,
             })
           );
-
           agentsArray = agentsArray
             .sort((a, b) => b.deals - a.deals || b.revenue - a.revenue)
             .map((agent, idx) => ({ ...agent, rank: idx + 1 }));
-
           setAgents(agentsArray);
         }
       } catch (err) {
-        console.error('Error loading agents:', err);
         setAgents([]);
       } finally {
         if (!cancelled) setTimeout(() => setLoading(false), 300);
@@ -219,7 +228,6 @@ export function TopAgents() {
             </div>
           </div>
         </CardHeader>
-
         <CardContent className="flex-1 relative z-10 px-6">
           {loading ? (
             <SkeletonLoader />
@@ -269,10 +277,15 @@ export function TopAgents() {
                     </motion.div>
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-start mb-1.5">
-                        <div className="flex-1 min-w-0">
+                        <div>
                           <p className="text-sm font-semibold truncate text-gray-900 dark:text-gray-100">
                             {agent.name}
                           </p>
+                          {agent.salesHead &&
+                            <p className="text-xs text-emerald-800 dark:text-emerald-300">
+                              Sales Head: {agent.salesHead}
+                            </p>
+                          }
                         </div>
                         <div className="text-right ml-2">
                           <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
@@ -313,3 +326,4 @@ export function TopAgents() {
     </motion.div>
   );
 }
+
