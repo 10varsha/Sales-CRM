@@ -16,7 +16,7 @@ interface Agent {
   revenue: number;
   target: number;
   rank?: number;
-  salesHead?: string; // New field: their sales head's name
+  salesHead?: string;
 }
 interface User {
   userid: number | string;
@@ -79,13 +79,13 @@ export function TopAgents() {
     const load = async () => {
       setLoading(true);
       try {
-        // Fetch users (heads + leads)
+        // Fetch users
         const usersRes = await fetchWithAuth('https://saleshub.silverspace.tech/users');
         let allUsers: User[] = [], salesLeads: User[] = [];
         if (usersRes.ok) {
           const apiUsers = await usersRes.json();
           allUsers = Array.isArray(apiUsers.items) ? apiUsers.items : (Array.isArray(apiUsers) ? apiUsers : []);
-          salesLeads = allUsers.filter((user: User) =>
+          salesLeads = allUsers.filter(user =>
             Number(user.roleid) === 4 || Number(user.roleid) === 5
           );
         }
@@ -93,7 +93,7 @@ export function TopAgents() {
         const userIdMap = new Map<string, User>();
         allUsers.forEach(user => userIdMap.set(String(user.userid), user));
 
-        // Fetch all leads
+        // Fetch leads
         const leadsRes = await fetchWithAuth(`${API_BASE_URL}/crm-leads?take=1000`);
         if (!leadsRes.ok) throw new Error('Failed to load leads');
         const result = await leadsRes.json();
@@ -112,7 +112,7 @@ export function TopAgents() {
             initials: string;
             salesHead?: string;
           }>();
-          salesLeads.forEach((user) => {
+          salesLeads.forEach(user => {
             const userId = String(user.userid);
             const userName = user.name || `User ${userId}`;
             const nameParts = userName.split(' ');
@@ -120,7 +120,7 @@ export function TopAgents() {
               ? `${nameParts[0][0]}${nameParts[nameParts.length - 1][0]}`.toUpperCase()
               : userName.slice(0, 2).toUpperCase();
 
-            // Find sales head: if you're a team lead, head is your manager (roleid 4); if you are a head, show yourself
+            // Find sales head: if manager, head is their manager (roleid 4); if head, show themselves
             let salesHead = '';
             if (Number(user.roleid) === 5 && user.managerid) {
               const mgr = userIdMap.get(String(user.managerid));
@@ -134,12 +134,14 @@ export function TopAgents() {
               String(lead.assignedto) === userId || String(lead.createdby) === userId
             );
             const deals = userLeads.length;
+            // Calculate revenue (prefer expectedrevenue, fallback to amountpaid, else 0)
             const revenue = userLeads.reduce((sum, lead) => {
-              const amount = lead.expectedrevenue != null && !isNaN(Number(lead.expectedrevenue))
-                ? Number(lead.expectedrevenue)
-                : lead.amountpaid != null && !isNaN(Number(lead.amountpaid))
-                ? Number(lead.amountpaid)
-                : 0;
+              const amount =
+                lead.expectedrevenue != null && !isNaN(Number(lead.expectedrevenue))
+                  ? Number(lead.expectedrevenue)
+                  : lead.amountpaid != null && !isNaN(Number(lead.amountpaid))
+                  ? Number(lead.amountpaid)
+                  : 0;
               return sum + amount;
             }, 0);
 
@@ -152,7 +154,7 @@ export function TopAgents() {
             });
           });
 
-          // Convert to sorted/ranked array
+          // Sort and rank agents by revenue (not deal count!)
           let agentsArray: Agent[] = Array.from(agentMap.entries()).map(
             ([userId, data]) => ({
               id: userId,
@@ -166,7 +168,7 @@ export function TopAgents() {
             })
           );
           agentsArray = agentsArray
-            .sort((a, b) => b.deals - a.deals || b.revenue - a.revenue)
+            .sort((a, b) => b.revenue - a.revenue || b.deals - a.deals)
             .map((agent, idx) => ({ ...agent, rank: idx + 1 }));
           setAgents(agentsArray);
         }
@@ -178,9 +180,7 @@ export function TopAgents() {
     };
 
     load();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [fetchWithAuth, getDateRangeFilter]);
 
   const formatCurrency = (value: number) =>
@@ -222,7 +222,7 @@ export function TopAgents() {
                   Top Performing Sales Leads
                 </CardTitle>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Ranked by performance • {agents.length} sales leads
+                  Ranked by Revenue • {agents.length} sales leads
                 </p>
               </div>
             </div>
@@ -326,4 +326,3 @@ export function TopAgents() {
     </motion.div>
   );
 }
-
