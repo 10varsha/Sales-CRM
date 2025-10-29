@@ -4,6 +4,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { useAuth } from '@/hooks/useAuth';
 import { formatDistanceToNow } from 'date-fns';
 
+
 interface ActivityItem {
   id: string | number;
   actorName?: string;
@@ -11,14 +12,17 @@ interface ActivityItem {
   changedAt: string;
 }
 
+
 export function ActivityFeed() {
   const { fetchWithAuth } = useAuth();
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
 
+
   useEffect(() => {
     let cancelled = false;
     let interval: NodeJS.Timeout;
+
 
     async function loadFeed() {
       try {
@@ -36,6 +40,7 @@ export function ActivityFeed() {
       }
     }
 
+
     loadFeed();
     interval = setInterval(loadFeed, 30000);
     return () => {
@@ -44,10 +49,11 @@ export function ActivityFeed() {
     };
   }, [fetchWithAuth]);
 
+
   return (
-    <Card className="h-full flex flex-col relative overflow-hidden border shadow-lg bg-gradient-to-br from-gray-50/30 via-white to-slate-50/30 dark:from-gray-950/10 dark:via-gray-950 dark:to-slate-950/10">
+    <Card className="h-full flex flex-col relative overflow-hidden border shadow-lg bg-gradient-to-br from-white via-yellow-50/40 to-amber-100/30 dark:from-gray-950 dark:via-yellow-950/20 dark:to-amber-950/20">
       <CardHeader className="relative z-10 pb-2">
-        <CardTitle className="text-xl font-bold bg-gradient-to-r from-emerald-600 to-teal-600 dark:from-emerald-400 dark:to-teal-400 bg-clip-text text-transparent">
+        <CardTitle className="text-xl font-bold bg-gradient-to-r from-yellow-600 to-amber-600 dark:from-yellow-400 dark:to-amber-400 bg-clip-text text-transparent">
           Activity Feed
         </CardTitle>
       </CardHeader>
@@ -61,10 +67,10 @@ export function ActivityFeed() {
             activity.map((n) => (
               <div
                 key={n.id}
-                className="flex items-start gap-3 bg-gradient-to-r from-white/80 to-emerald-50/60 dark:from-gray-900/60 dark:to-emerald-950/40 border border-emerald-100/50 dark:border-emerald-900/40 rounded-xl shadow p-3 hover:shadow-lg transition-all duration-200"
+                className="flex items-start gap-3 bg-gradient-to-r from-white to-yellow-50/70 dark:from-gray-900/80 dark:to-yellow-950/30 border border-yellow-200/60 dark:border-yellow-800/40 rounded-xl shadow p-3 hover:shadow-lg transition-all duration-200"
               >
-                <Avatar className="h-10 w-10 border-2 border-emerald-200 dark:border-emerald-700 shadow">
-                  <AvatarFallback className="bg-gradient-to-br from-emerald-500 to-teal-500 text-white font-bold">
+                <Avatar className="h-10 w-10 border-2 border-yellow-300 dark:border-yellow-700 shadow">
+                  <AvatarFallback className="bg-gradient-to-br from-yellow-400 to-amber-500 text-white font-bold">
                     {n.actorName
                       ? n.actorName
                           .split(' ')
@@ -76,7 +82,7 @@ export function ActivityFeed() {
                   </AvatarFallback>
                 </Avatar>
                 <div className="flex-1 min-w-0">
-                  <div className="font-semibold text-emerald-900 dark:text-emerald-200 text-sm truncate">
+                  <div className="font-semibold text-gray-900 dark:text-yellow-100 text-sm truncate">
                     {n.summary}
                   </div>
                   <div className="flex items-center gap-1 mt-1">
