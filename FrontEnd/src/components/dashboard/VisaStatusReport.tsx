@@ -5,11 +5,7 @@ import {
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from '@/components/ui/select';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -20,76 +16,36 @@ import { useToast } from '@/hooks/use-toast';
 import { Download, Filter } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useDateFilter } from '@/context/DateFilterContext';
 
-const VISA_STATUSES = [
-  'F-1 Visa', 'F-1 OPT', 'STEM OPT', 'H-1B Visa', 'Green Card', 'Other', 'Unknown'
-];
+// Code 1 - Simple visa status map
+const VISA_STATUS_MAP: Record<number, string> = {
+  1: "H1B",
+  2: "F1",
+  3: "OPT",
+  4: "STEM",
+  5: "Green Card",
+  6: "USC",
+  7: "H4"
+};
 
-const VISA_COLORS = {
-  'F-1 Visa': '#3B82F6',
-  'F-1 OPT': '#10B981',
-  'STEM OPT': '#8B5CF6',
-  'H-1B Visa': '#F59E0B',
+const VISA_STATUS_ORDER = [1, 2, 3, 4, 5, 6, 7];
+
+const VISA_COLORS: Record<string, string> = {
+  'H1B': '#3B82F6',
+  'F1': '#10B981',
+  'OPT': '#8B5CF6',
+  'STEM': '#F59E0B',
   'Green Card': '#EF4444',
-  'Other': '#6B7280',
-  'Unknown': '#9CA3AF'
+  'USC': '#6B7280',
+  'H4': '#EC4899'
 };
 
-const VISA_STATUS_MAP = {
-  1: 'F-1 Visa',
-  2: 'F-1 OPT',
-  3: 'STEM OPT',
-  4: 'H-1B Visa',
-  5: 'Green Card',
-  6: 'Other'
-};
-
-function getVisaTypeName(visaStatusId) {
-  return VISA_STATUS_MAP[visaStatusId] || 'Unknown';
-}
-
-function normalizeVisaType(visaType) {
-  if (!visaType) return 'Unknown';
-  const normalized = visaType.toLowerCase().trim();
-  if (normalized.includes('f-1') || normalized.includes('f1')) {
-    if (normalized.includes('stem')) return 'STEM OPT';
-    else if (normalized.includes('opt')) return 'F-1 OPT';
-    return 'F-1 Visa';
-  }
-  if (normalized.includes('stem')) return 'STEM OPT';
-  if (normalized.includes('opt')) return 'F-1 OPT';
-  if (normalized.includes('h-1b') || normalized.includes('h1b') || normalized.includes('h-1') || normalized.includes('h1')) return 'H-1B Visa';
-  if (normalized.includes('green card') || normalized.includes('greencard') || normalized.includes('permanent resident') ||
-    normalized.includes('pr') || normalized.includes('eb-') || normalized.includes('eb')) return 'Green Card';
-  if (normalized.includes('l-1') || normalized.includes('l1') || normalized.includes('o-1') || normalized.includes('o1') ||
-    normalized.includes('e-2') || normalized.includes('e2') || normalized.includes('tn') || normalized.includes('j-1') || normalized.includes('j1')) return 'Other';
-  return 'Unknown';
-}
-
-const TIME_FILTERS = [
-  { value: 'all', label: 'All Time' },
-  { value: 'day', label: 'Today' },
-  { value: 'week', label: 'This Week' },
-  { value: 'month', label: 'This Month' }
-];
-
-function filterLeadsByTime(leads, filter) {
-  if (filter === 'all') return leads;
-  const now = new Date();
-  return leads.filter((lead) => {
-    if (!lead.createdat) return false;
-    const date = new Date(lead.createdat);
-    if (filter === 'day') return date.toDateString() === now.toDateString();
-    if (filter === 'week') {
-      const d = new Date(now);
-      d.setDate(now.getDate() - 7);
-      return date >= d;
-    }
-    if (filter === 'month') {
-      return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
-    }
-    return true;
-  });
+// Same logic as DashboardStats.tsx for closedDeals
+function isClosedDeal(lead: any): boolean {
+  const status = (lead.status || '').toLowerCase();
+  const stage = (lead.stage || '').toLowerCase();
+  return status.includes('signed') || stage.includes('signed');
 }
 
 function SkeletonLoader() {
@@ -105,8 +61,30 @@ function SkeletonLoader() {
   );
 }
 
-// Updated tooltip to show team breakdown by visa type
-const VisaCustomTooltip = ({ active = false, payload = [], label = "" }) => {
+// Code 2 - Custom Tooltip for basic view
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    return (
+      <div className="bg-white dark:bg-gray-950 border-2 border-orange-200/50 dark:border-orange-800/50 rounded-lg shadow-xl p-3 backdrop-blur-md">
+        <p className="font-semibold text-gray-900 dark:text-gray-100 mb-2">{label}</p>
+        {payload.map((entry: any, index: number) => (
+          <div key={index} className="flex items-center gap-2 text-sm">
+            <div
+              className="w-3 h-3 rounded-full"
+              style={{ backgroundColor: entry.color }}
+            />
+            <span className="text-gray-700 dark:text-gray-300">{entry.name}:</span>
+            <span className="font-bold text-gray-900 dark:text-gray-100">{entry.value}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return null;
+};
+
+// Code 2 - Custom Tooltip with team breakdown
+const VisaCustomTooltip = ({ active = false, payload = [], label = "" }: any) => {
   if (active && payload && payload.length) {
     const visaData = payload[0]?.payload;
     if (!visaData?.teamBreakdown?.length) return null;
@@ -117,7 +95,7 @@ const VisaCustomTooltip = ({ active = false, payload = [], label = "" }) => {
       >
         <div className="font-bold mb-2 text-base">{label}</div>
         <div className="space-y-2">
-          {visaData.teamBreakdown.map((team, idx) => (
+          {visaData.teamBreakdown.map((team: any, idx: number) => (
             team.count > 0 && (
               <div key={idx} className="pl-2 border-l-2" style={{ borderColor: VISA_COLORS[label] }}>
                 <div className="font-semibold text-sm">{team.teamName}</div>
@@ -144,58 +122,71 @@ const VisaCustomTooltip = ({ active = false, payload = [], label = "" }) => {
   return null;
 };
 
-const CustomTooltip = ({ active, payload, label }) => {
-  if (active && payload && payload.length) {
-    return (
-      <div className="bg-white dark:bg-gray-950 border-2 border-orange-200/50 dark:border-orange-800/50 rounded-lg shadow-xl p-3 backdrop-blur-md">
-        <p className="font-semibold text-gray-900 dark:text-gray-100 mb-2">{label}</p>
-        {payload.map((entry, index) => (
-          <div key={index} className="flex items-center gap-2 text-sm">
-            <div
-              className="w-3 h-3 rounded-full"
-              style={{ backgroundColor: entry.color }}
-            />
-            <span className="text-gray-700 dark:text-gray-300">{entry.name}:</span>
-            <span className="font-bold text-gray-900 dark:text-gray-100">{entry.value}</span>
-          </div>
-        ))}
-      </div>
-    );
-  }
-  return null;
-};
-
 export function VisaStatusReport() {
   const { fetchWithAuth } = useAuth();
   const { toast } = useToast();
-  const [leads, setLeads] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [timeFilter, setTimeFilter] = useState('all');
+  const { getDateRangeFilter } = useDateFilter(); // Import date filter context
+  const [leads, setLeads] = useState<any[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selectedHeadId, setSelectedHeadId] = useState(null);
+  const [selectedHeadId, setSelectedHeadId] = useState<string | null>(null);
   const [chartType, setChartType] = useState('bar');
   const ref = useRef(null);
   const isInView = useInView(ref, { once: true });
 
+  // Filter leads by date from context
+  const filterLeadsByDate = (leads: any[]) => {
+    const range = getDateRangeFilter();
+    if (!range) return leads;
+
+    return leads.filter(lead => {
+      const leadDate = new Date(lead.createdat || lead.created_at || '');
+      return leadDate >= range.start && leadDate <= range.end;
+    });
+  };
+
+  // Code 2 - Cursor-based pagination for data fetching
   useEffect(() => {
     let cancelled = false;
-    let interval;
+    let interval: NodeJS.Timeout;
+    
     const load = async () => {
       setLoading(true);
       try {
+        // Fetch users
         const usersRes = await fetchWithAuth("https://saleshub.silverspace.tech/users");
-        let allUsers = [];
+        let allUsers: any[] = [];
         if (usersRes.ok) {
           const apiUsers = await usersRes.json();
           allUsers = Array.isArray(apiUsers.items) ? apiUsers.items : (Array.isArray(apiUsers) ? apiUsers : []);
         }
+
+        // Code 2 - Fetch leads with cursor-based pagination
         const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
-        const leadsRes = await fetchWithAuth(`${API_BASE_URL}/crm-leads?take=1000`);
-        let allLeads = [];
-        if (leadsRes.ok) {
-          const result = await leadsRes.json();
-          allLeads = Array.isArray(result) ? result : result.items || [];
+        const allLeads: any[] = [];
+        let cursor: number | null = null;
+
+        // First request
+        const firstRes = await fetchWithAuth(`${API_BASE_URL}/crm-leads?take=100`);
+        if (!firstRes.ok) throw new Error('Failed to load leads');
+        
+        const firstData = await firstRes.json();
+        const firstItems = Array.isArray(firstData) ? firstData : firstData.items || [];
+        allLeads.push(...firstItems);
+        
+        // Get cursor from response
+        cursor = Array.isArray(firstData) ? null : firstData.nextCursor;
+
+        // Continue fetching with cursor until no more data or limit reached
+        while (cursor !== null && allLeads.length < 1000) {
+          const res = await fetchWithAuth(`${API_BASE_URL}/crm-leads?take=100&cursor=${cursor}`);
+          if (!res.ok) break;
+          
+          const data = await res.json();
+          allLeads.push(...(data.items || []));
+          cursor = data.nextCursor;
         }
+
         if (!cancelled) {
           setUsers(allUsers);
           setLeads(allLeads);
@@ -212,6 +203,7 @@ export function VisaStatusReport() {
         if (!cancelled) setTimeout(() => setLoading(false), 300);
       }
     };
+
     load();
     interval = setInterval(load, 30000);
     return () => { cancelled = true; clearInterval(interval); };
@@ -219,56 +211,51 @@ export function VisaStatusReport() {
 
   const salesHeads = useMemo(() => users.filter(u => u.roleid === 4), [users]);
 
-  // Chart data with visa types on X-axis
-  const visaChartData = useMemo(() => {
-    if (!selectedHeadId) {
-      // All heads combined - group by visa type
-      const filteredLeads = filterLeadsByTime(leads, timeFilter);
-      
-      return VISA_STATUSES.map(visaType => {
-        const visaLeads = filteredLeads.filter(lead => {
-          const normalized = normalizeVisaType(getVisaTypeName(lead.visastatusid));
-          return normalized === visaType;
-        });
+  // Code 1 - Simple visa status name getter
+  const getVisaStatusName = (visaStatusId: number): string => {
+    return VISA_STATUS_MAP[visaStatusId] || 'Other';
+  };
 
-        const converted = visaLeads.filter(lead => {
-          const status = lead.status || lead.stage || '';
-          return status.toLowerCase().includes('closed won') ||
-                 status.toLowerCase().includes('won') ||
-                 lead.isclosed === true ||
-                 lead.iswon === true;
-        }).length;
+  // Code 2 - Two different modes for chart data with date filtering
+  const visaChartData = useMemo(() => {
+    // Apply date filter from context
+    const dateFilteredLeads = filterLeadsByDate(leads);
+
+    if (!selectedHeadId) {
+      // Mode 1: All heads combined - aggregated data by visa type
+      return VISA_STATUS_ORDER.map(id => {
+        const visaName = VISA_STATUS_MAP[id];
+        const visaLeads = dateFilteredLeads.filter(lead => 
+          String(lead.visastatusid) === String(id)
+        );
+
+        // Use same logic as DashboardStats.tsx closedDeals
+        const converted = visaLeads.filter(lead => isClosedDeal(lead)).length;
 
         return {
-          visaType,
+          visaType: visaName,
           totalLeads: visaLeads.length,
           converted: converted
         };
       }).filter(item => item.totalLeads > 0);
     } else {
-      // Selected head - show visa types with team breakdown
+      // Mode 2: Selected head - show visa types with team breakdown
       const teamLeads = users.filter(u => u.roleid === 5 && String(u.managerid) === String(selectedHeadId));
-      const teamLeadIds = new Set(teamLeads.map(u => String(u.userid)));
       
-      return VISA_STATUSES.map(visaType => {
+      return VISA_STATUS_ORDER.map(id => {
+        const visaName = VISA_STATUS_MAP[id];
+        
         const teamBreakdown = teamLeads.map(teamLead => {
-          const teamLeadLeads = filterLeadsByTime(
-            leads.filter(l => String(l.assignedto) === String(teamLead.userid)),
-            timeFilter
+          const teamLeadLeads = dateFilteredLeads.filter(l => 
+            String(l.assignedto) === String(teamLead.userid)
           );
 
-          const visaLeads = teamLeadLeads.filter(lead => {
-            const normalized = normalizeVisaType(getVisaTypeName(lead.visastatusid));
-            return normalized === visaType;
-          });
+          const visaLeads = teamLeadLeads.filter(lead => 
+            String(lead.visastatusid) === String(id)
+          );
 
-          const converted = visaLeads.filter(lead => {
-            const status = lead.status || lead.stage || '';
-            return status.toLowerCase().includes('closed won') ||
-                   status.toLowerCase().includes('won') ||
-                   lead.isclosed === true ||
-                   lead.iswon === true;
-          }).length;
+          // Use same logic as DashboardStats.tsx closedDeals
+          const converted = visaLeads.filter(lead => isClosedDeal(lead)).length;
 
           return {
             teamName: teamLead.name,
@@ -281,39 +268,41 @@ export function VisaStatusReport() {
         const totalConverted = teamBreakdown.reduce((sum, t) => sum + t.converted, 0);
 
         return {
-          visaType,
+          visaType: visaName,
           totalLeads,
           converted: totalConverted,
           teamBreakdown
         };
       }).filter(item => item.totalLeads > 0);
     }
-  }, [selectedHeadId, leads, users, timeFilter]);
+  }, [selectedHeadId, leads, users, getDateRangeFilter]);
 
-  // Pie data for selected head
+  // Pie data for selected head with date filtering
   const pieData = useMemo(() => {
     if (!selectedHeadId) return [];
     
+    const dateFilteredLeads = filterLeadsByDate(leads);
     const teamLeads = users.filter(u => u.roleid === 5 && String(u.managerid) === String(selectedHeadId));
     const teamLeadIds = new Set(teamLeads.map(u => String(u.userid)));
-    const allLeadsByTeam = filterLeadsByTime(
-      leads.filter(l => l.assignedto !== undefined && teamLeadIds.has(String(l.assignedto))),
-      timeFilter
+    const allLeadsByTeam = dateFilteredLeads.filter(l => 
+      l.assignedto !== undefined && teamLeadIds.has(String(l.assignedto))
     );
 
-    const visaCounts = {};
-    for(const visa of VISA_STATUSES) visaCounts[visa] = 0;
+    const visaCounts: Record<string, number> = {};
+    VISA_STATUS_ORDER.forEach(id => {
+      visaCounts[VISA_STATUS_MAP[id]] = 0;
+    });
     
-    for(const lead of allLeadsByTeam) {
-      const visaType = normalizeVisaType(getVisaTypeName(lead.visastatusid));
+    for (const lead of allLeadsByTeam) {
+      const visaType = getVisaStatusName(lead.visastatusid);
       visaCounts[visaType] = (visaCounts[visaType] || 0) + 1;
     }
 
-    return VISA_STATUSES.map(status => ({
-      name: status,
-      value: visaCounts[status] || 0,
+    return VISA_STATUS_ORDER.map(id => ({
+      name: VISA_STATUS_MAP[id],
+      value: visaCounts[VISA_STATUS_MAP[id]] || 0,
     })).filter(v => v.value > 0);
-  }, [selectedHeadId, users, leads, timeFilter]);
+  }, [selectedHeadId, users, leads, getDateRangeFilter]);
 
   const totalLeads = visaChartData.reduce((sum, v) => sum + v.totalLeads, 0);
   const totalConverted = visaChartData.reduce((sum, v) => sum + v.converted, 0);
@@ -353,16 +342,6 @@ export function VisaStatusReport() {
                 <Download className="h-4 w-4 mr-2" />
                 Export
               </Button>
-              <Select value={timeFilter} onValueChange={setTimeFilter}>
-                <SelectTrigger className="w-[120px] bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm border-orange-300/50 dark:border-orange-800/50 font-semibold shadow-md">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {TIME_FILTERS.map(filter => (
-                    <SelectItem key={filter.value} value={filter.value}>{filter.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
               <Select value={selectedHeadId || ''} onValueChange={val => setSelectedHeadId(val)}>
                 <SelectTrigger className="w-[225px] bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm border-orange-300/50 dark:border-orange-800/50 font-semibold shadow-md">
                   <Filter className="h-4 w-4 mr-2" />
@@ -383,12 +362,7 @@ export function VisaStatusReport() {
             <SkeletonLoader />
           ) : (
             <>
-              {selectedHeadId && chartType === 'bar' && (
-                <Button size="sm" variant="outline" onClick={() => setSelectedHeadId(null)} className="mb-4">
-                  ← Back to All Heads
-                </Button>
-              )}
-              {selectedHeadId && chartType === 'pie' && (
+              {selectedHeadId && (
                 <Button size="sm" variant="outline" onClick={() => setSelectedHeadId(null)} className="mb-4">
                   ← Back to All Heads
                 </Button>
@@ -436,7 +410,7 @@ export function VisaStatusReport() {
                       />
                       <YAxis className="text-xs" stroke="currentColor" allowDecimals={false} />
                       <Tooltip 
-                        content={(props: any) => selectedHeadId ? <VisaCustomTooltip {...(props as any)} /> : <CustomTooltip {...(props as any)} />}
+                        content={(props: any) => selectedHeadId ? <VisaCustomTooltip {...props} /> : <CustomTooltip {...props} />}
                         cursor={{ fill: 'rgba(251, 146, 60, 0.05)' }}
                         wrapperStyle={{ outline: 'none' }} 
                       />
@@ -453,7 +427,7 @@ export function VisaStatusReport() {
                       <Bar
                         dataKey="converted"
                         fill="url(#colorConverted)"
-                        name="Converted"
+                        name="Closed Deals"
                         barSize={36}
                         radius={[8, 8, 0, 0]}
                         style={{ filter: 'drop-shadow(0 3px 19px rgba(0,0,0,0.10))' }}
@@ -474,7 +448,7 @@ export function VisaStatusReport() {
                         cx="50%"
                         cy="50%"
                         outerRadius={120}
-                        label={({ name, percent }) => `${name} (${(percent*100).toFixed(1)}%)`}
+                        label={({ name, percent }: any) => `${name} (${(percent*100).toFixed(1)}%)`}
                       >
                         {pieData.map((entry, i) => (
                           <Cell key={`cell${i}`} fill={VISA_COLORS[entry.name]} />
@@ -504,7 +478,6 @@ export function VisaStatusReport() {
                 </motion.div>
               </motion.div>
 
-              {/* Visa Category Legend */}
               <motion.div
                 className="mt-4 p-3 rounded-lg bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm"
                 initial={{ opacity: 0 }}

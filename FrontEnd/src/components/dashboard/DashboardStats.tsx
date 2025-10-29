@@ -406,7 +406,7 @@ export function DashboardStats() {
           }).length;
 
           const closedDeals = filteredLeads.filter(l => 
-            l.status?.toLowerCase().includes('closed') || l.stage?.toLowerCase().includes('closed')
+            l.status?.toLowerCase().includes('signed') || l.stage?.toLowerCase().includes('signed')
           ).length;
 
           const totalRevenue = filteredLeads.reduce((sum, l) => {
